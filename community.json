@@ -1,0 +1,34 @@
+[
+  {
+    "idx": 3,
+    "name": "Chrono Weave Mantle",
+    "rarity": "Legendary",
+    "emoji": "🟡",
+    "score": 90215,
+    "description": "A cloak spun from the threads of time itself. Allows the wearer to glimpse potential futures, providing unparalleled foresight in battle, and enhances the rapid recovery of spell energy.",
+    "imagePath": "temp/1754420855800_item3.png",
+    "sourceChest": "1754420855800",
+    "user": "tfortalos"
+  },
+  {
+    "idx": 1,
+    "name": "Celestial Shard",
+    "rarity": "Mythic",
+    "emoji": "🔴",
+    "score": 87654,
+    "description": "A fragment of a star, this shard imbues the user with cosmic energy, enhancing magical abilities and granting brief glimpses into the future.",
+    "imagePath": "temp/1754422874679_item1.png",
+    "sourceChest": "1754422874679",
+    "user": "tfortalos"
+  },
+  {
+    "idx": 3,
+    "name": "Sturdy Twine Bracelet",
+    "rarity": "Common",
+    "emoji": "🟤",
+    "score": 34987,
+    "description": "A simple yet durable bracelet made from braided twine. It does not possess enchantments but is believed to bring good luck and safe travels to those who wear it.",
+    "imagePath": "temp/1754425650321_item3.png",
+    "user": "tfortalos"
+  }
+]
