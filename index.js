@@ -23,7 +23,8 @@ const client = new Client({
 });
 
 const TOKEN = process.env.DISCORD_TOKEN;
-const ADMIN_IDS = ['180163503980544001']; // Add your Discord ID(s)
+const ALLOWED_ROLE_IDS = ['622845214247223366','454313119406227457','749118349874823260']; // Replace with actual role IDs
+
 
 const chestRarities = ['Common', 'Uncommon', 'Rare', 'Epic', 'Legendary', 'Mythic', 'Artifact'];
 const rarityChances = [40, 25, 15, 10, 5, 4.5, 0.5];
@@ -161,7 +162,11 @@ client.on('messageCreate', async (msg) => {
   }
 
   if (command === '!drop') {
-    if (!ADMIN_IDS.includes(userId)) return msg.reply('❌ Only admins can drop chests.');
+    const hasRoleAccess = msg.member.roles.cache.some(role => ALLOWED_ROLE_IDS.includes(role.id));
+if (!hasRoleAccess) {
+  return msg.reply('❌ You need a specific role to use this command.');
+}
+
     await dropChest(guildId, true);
   }
 
