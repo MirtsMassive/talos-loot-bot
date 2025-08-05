@@ -4,10 +4,23 @@ const fs = require('fs');
 const path = require('path');
 const fetch = require('node-fetch').default;
 
+// ✅ Check that OPENAI_API_KEY is present before creating the OpenAI client
 console.log("🔑 OPENAI_API_KEY loaded:", !!process.env.OPENAI_API_KEY);
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
+if (!process.env.OPENAI_API_KEY) {
+  console.error("❌ OPENAI_API_KEY is not set in environment variables.");
+  process.exit(1); // 🔴 Stop the app before it crashes
+}
+
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
+  ]
+});
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const ADMIN_IDS = ['180163503980544001']; // Add your Discord ID(s)
