@@ -2,9 +2,7 @@ const { Client, GatewayIntentBits, AttachmentBuilder } = require('discord.js');
 const { OpenAI } = require('openai');
 const fs = require('fs');
 const path = require('path');
-const dotenv = require('dotenv');
 const fetch = require('node-fetch').default;
-dotenv.config();
 
 console.log("🔑 OPENAI_API_KEY loaded:", !!process.env.OPENAI_API_KEY);
 
