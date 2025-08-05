@@ -33,8 +33,8 @@ const rarityColors = {
   Rare: '🔵',
   Epic: '🟣',
   Legendary: '🟡',
-  Mythic: '🔴',
-  Artifact: '🌈'
+  Mythic: '⚔',
+  Artifact: '👁‍🗨'
 };
 
 let chests = [];
@@ -278,6 +278,24 @@ Description: ...`
     msg.reply({ content: `🧾 **Your Inventory:**\n${list}`, files: imageFiles });
   }
 
+  if (command === '!view') {
+  const target = msg.mentions.users.first();
+  if (!target) return msg.reply('Usage: `!view @user`');
+
+  const inv = inventories[target.id] || [];
+  if (!inv.length) return msg.reply(`📦 ${target.username}'s inventory is empty.`);
+
+  const list = inv.map((i, idx) =>
+    `**${idx + 1}.** ${getColor(i.rarity)} "${i.name}" *(Rarity: ${i.rarity}, Score: ${i.score})*`
+  ).join('\n');
+
+  const imageFiles = inv
+    .filter(i => i.imagePath && fs.existsSync(i.imagePath))
+    .map(i => new AttachmentBuilder(i.imagePath));
+
+  msg.reply({ content: `🧾 **${target.username}'s Inventory:**\n${list}`, files: imageFiles });
+}
+
   if (command === '!community') {
     if (!communityInventory.length) return msg.channel.send("👥 No loot claimed yet.");
     const leaderboard = [...communityInventory]
@@ -311,6 +329,7 @@ Description: ...`
       `📦 \`!inventory\` — View your personal loot inventory\n` +
       `🏆 \`!community\` — See the top 10 loot scores\n` +
       `🔑 \`!keys\` — Check how many keys you have\n` +
+      `🕵️ \`!view @user\` — View another user’s inventory\n` +
       `📌 \`!setchannel\` — Set this channel for loot drops\n`;
 
     if (isAdmin) {
