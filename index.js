@@ -7,10 +7,6 @@ const fetch = require('node-fetch').default;
 // ✅ Check that OPENAI_API_KEY is present before creating the OpenAI client
 console.log("🔑 OPENAI_API_KEY loaded:", !!process.env.OPENAI_API_KEY);
 
-if (command === '!drop')
-  console.log(`!drop command received from ${msg.author.username}`);
-  // ...
-
 if (!process.env.OPENAI_API_KEY) {
   console.error("❌ OPENAI_API_KEY is not set in environment variables.");
   process.exit(1); // 🔴 Stop the app before it crashes
@@ -173,10 +169,24 @@ async function dropChest(guildId, manual = false) {
 
 client.on('messageCreate', async (msg) => {
   if (!msg.guild || msg.author.bot) return;
+
   const args = msg.content.trim().split(' ');
   const command = args.shift().toLowerCase();
   const userId = msg.author.id;
   const guildId = msg.guild.id;
+
+  if (command === '!drop') {
+    console.log(`!drop command received from ${msg.author.username}`);
+
+    const hasRoleAccess = msg.member.roles.cache.some(role =>
+      ALLOWED_ROLE_IDS.includes(role.id)
+    );
+    if (!hasRoleAccess) {
+      return msg.reply('❌ You need a specific role to use this command.');
+    }
+
+    await dropChest(guildId, true);
+  }
 
   if (!keys.has(userId)) keys.set(userId, 3);
 
@@ -185,19 +195,6 @@ client.on('messageCreate', async (msg) => {
     saveAll();
     return msg.reply(`✅ This channel is now set as the drop zone for this server.`);
   }
-
-if (command === '!drop') {
-  const hasRoleAccess = msg.member.roles.cache.some(role =>
-    ALLOWED_ROLE_IDS.includes(role.id)
-  );
-
-  if (!hasRoleAccess) {
-    return msg.reply('❌ You need a specific role to use this command.');
-  }
-
-  await dropChest(guildId, true);
-}
-
   if (command === '!open') {
     const now = Date.now();
 
