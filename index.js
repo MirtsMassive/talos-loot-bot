@@ -144,7 +144,8 @@ async function dropChest(guildId, manual = false) {
     imagePath,
     claimedBy: null,
     items: [],
-    guildId
+    guildId,                // ✅ Add a comma here
+    timestamp: Date.now(),  // ✅ Now this line is valid
   };
 
   chests.push(chest);
@@ -175,6 +176,14 @@ client.on('messageCreate', async (msg) => {
   const userId = msg.author.id;
   const guildId = msg.guild.id;
 
+if (command === '!usedrop') {
+  const userKeys = keys.get(userId) || 0;
+  if (userKeys < 5) return msg.reply('❌ You need **5 keys** to summon a chest.');
+
+  keys.set(userId, userKeys - 5);
+  await dropChest(guildId, true);
+  msg.channel.send('🔮 A chest has been summoned using your keys!');
+}
   if (command === '!drop') {
     console.log(`!drop command received from ${msg.author.username}`);
 
@@ -209,8 +218,20 @@ client.on('messageCreate', async (msg) => {
     }
 
     const id = args[0];
-    const chest = chests.find(c => c.id === id && !c.claimedBy && c.guildId === guildId);
-    if (!chest) return msg.reply('❌ That chest is not available.');
+    const chest = chests.find(c => c.id === id && c.guildId === guildId);
+if (!chest) return msg.reply('❌ That chest does not exist.');
+
+if (chest.claimedBy && chest.claimedBy !== userId) {
+  return msg.reply('🛑 This chest has already been opened by someone else.');
+}
+
+// If chest was opened by someone else less than 5 mins ago, block it
+const fiveMinutes = 5 * 60 * 1000;
+
+if (chest.claimedBy && chest.claimedBy !== userId && now - chest.timestamp < fiveMinutes) {
+  const remaining = Math.ceil((fiveMinutes - (now - chest.timestamp)) / 1000);
+  return msg.reply(`⏳ This chest was opened recently. Try again in ${remaining}s.`);
+}
 
     const userKeys = keys.get(userId) || 0;
     if (userKeys < 1) return msg.reply('🔐 You have **0** keys.');
@@ -408,6 +429,7 @@ if (command === '!help') {
     `🔁 \`!redeemkeys <amount>\` — Convert points into keys\n` +
     `🕵️ \`!view @user\` — View another user’s inventory\n` +
     `🏆 \`!community\` — See the top 10 loot scores\n` +
+    `🔮 \`!usedrop\` — Use 5 keys to summon a loot chest\n` +
     `🔑 \`!keys\` — Check your key count\n`;
 
   if (hasRoleAccess) {
@@ -424,6 +446,36 @@ if (command === '!help') {
 
 client.once('ready', () => {
   console.log(`🟢 Logged in as ${client.user.tag}`);
+
+  function scheduleRandomDrops() {
+    const dropTimes = [];
+
+    while (dropTimes.length < 3) {
+      const randomHour = Math.floor(Math.random() * 24);
+      const randomMinute = Math.floor(Math.random() * 60);
+      const timestamp = new Date();
+      timestamp.setHours(randomHour, randomMinute, 0, 0);
+
+      // Ensure at least 30 minutes apart
+      if (dropTimes.every(t => Math.abs(t - timestamp.getTime()) >= 30 * 60 * 1000)) {
+        dropTimes.push(timestamp.getTime());
+      }
+    }
+
+    dropTimes.forEach(time => {
+      const delay = time - Date.now();
+      if (delay > 0) {
+        setTimeout(async () => {
+          for (const guildId of Object.keys(serverConfig)) {
+            await dropChest(guildId);
+          }
+          scheduleRandomDrops(); // Reschedule after all have dropped
+        }, delay);
+      }
+    });
+  }
+
+  scheduleRandomDrops(); // ✅ Called only once, inside the first .once('ready')
 });
 
 client.login(TOKEN);
