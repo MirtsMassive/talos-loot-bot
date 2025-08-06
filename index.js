@@ -182,14 +182,17 @@ client.on('messageCreate', async (msg) => {
     return msg.reply(`✅ This channel is now set as the drop zone for this server.`);
   }
 
-  if (command === '!drop') {
-    const hasRoleAccess = msg.member.roles.cache.some(role => ALLOWED_ROLE_IDS.includes(role.id));
-if (!hasRoleAccess) {
-  return msg.reply('❌ You need a specific role to use this command.');
-}
+if (command === '!drop') {
+  const hasRoleAccess = msg.member.roles.cache.some(role =>
+    ALLOWED_ROLE_IDS.includes(role.id)
+  );
 
-    await dropChest(guildId, true);
+  if (!hasRoleAccess) {
+    return msg.reply('❌ You need a specific role to use this command.');
   }
+
+  await dropChest(guildId, true);
+}
 
   if (command === '!open') {
     const now = Date.now();
@@ -391,22 +394,31 @@ if (command === '!givekeys') {
   msg.channel.send(`✅ Gave ${amount} key(s) to <@${target}>.`);
 }
 
-  if (command === '!help') {
-    const isAdmin = ADMIN_IDS.includes(userId);
-    let helpText = `📜 **TALOS Loot Bot Commands**\n\n` +
-      `🎁 \`!open <chestId>\` — Open a chest using 1 key\n` +
-      `🧾 \`!claim <itemNumber>\` — Claim an item from an opened chest\n` +
-      `📦 \`!inventory\` — View your personal loot inventory\n` +
-      `🏆 \`!community\` — See the top 10 loot scores\n` +
-      `🔑 \`!keys\` — Check how many keys you have\n` +
-      `🕵️ \`!view @user\` — View another user’s inventory\n`;
+if (command === '!help') {
+  const hasRoleAccess = msg.member.roles.cache.some(role => ALLOWED_ROLE_IDS.includes(role.id));
+  const hasKeyPermission = msg.member.roles.cache.some(role => KEYMASTER_ROLE_IDS.includes(role.id));
 
-    if (isAdmin) {
-      helpText += `\n🔧 **Admin Only**\n💠 \`!drop\` — Manually spawn a loot chest\n➕ \`!givekeys @user <amount>\` — Grant keys to any user\n📌 \`!setchannel\` — Set this channel for loot drops\n`;
-    }
+  let helpText = `📜 **TALOS Loot Bot Commands**\n\n` +
+    `🎁 \`!open <chestId>\` — Open a chest using 1 key\n` +
+    `🧾 \`!claim <itemNumber>\` — Claim an item from an opened chest\n` +
+    `📦 \`!inventory\` — View your personal loot inventory\n` +
+    `♻️ \`!scrap <itemNumber>\` — Scrap an item for points\n` +
+    `💠 \`!points\` — View your point balance\n` +
+    `🔁 \`!redeemkeys <amount>\` — Convert points into keys\n` +
+    `🕵️ \`!view @user\` — View another user’s inventory\n` +
+    `🏆 \`!community\` — See the top 10 loot scores\n` +
+    `🔑 \`!keys\` — Check your key count\n`;
 
-    msg.reply(helpText);
+  if (hasRoleAccess) {
+    helpText += `\n💠 \`!drop\` — Manually spawn a loot chest\n📌 \`!setchannel\` — Set this channel as the drop zone\n`;
   }
+
+  if (hasKeyPermission) {
+    helpText += `➕ \`!givekeys @user <amount>\` — Grant keys to another user\n`;
+  }
+
+  msg.reply(helpText);
+}
 });
 
 client.once('ready', () => {
