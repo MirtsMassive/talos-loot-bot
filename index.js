@@ -24,7 +24,7 @@ const client = new Client({
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const ALLOWED_ROLE_IDS = ['622845214247223366','454313119406227457','749118349874823260','1402331068899790918']; // Replace with actual role IDs
-
+const KEYMASTER_ROLE_IDS = ['622845214247223366','454313119406227457']; // Only roles allowed to give keys
 
 const chestRarities = ['Common', 'Uncommon', 'Rare', 'Epic', 'Legendary', 'Mythic', 'Artifact'];
 const rarityChances = [40, 25, 15, 10, 5, 4.5, 0.5];
@@ -44,6 +44,27 @@ let inventories = {};
 let communityInventory = [];
 let userCooldowns = new Map();
 let userOpenLock = new Set();
+let points = {};
+if (fs.existsSync('points.json')) points = JSON.parse(fs.readFileSync('points.json'));
+
+function saveAll() {
+  fs.writeFileSync('serverConfig.json', JSON.stringify(serverConfig, null, 2));
+  fs.writeFileSync('inventory.json', JSON.stringify(inventories, null, 2));
+  fs.writeFileSync('community.json', JSON.stringify(communityInventory, null, 2));
+  fs.writeFileSync('points.json', JSON.stringify(points, null, 2));
+}
+
+function getScrapValue(rarity) {
+  return {
+    Common: 10,
+    Uncommon: 20,
+    Rare: 40,
+    Epic: 60,
+    Legendary: 80,
+    Mythic: 100,
+    Artifact: 200
+  }[rarity] || 5;
+}
 
 let serverConfig = {};
 if (fs.existsSync('serverConfig.json')) serverConfig = JSON.parse(fs.readFileSync('serverConfig.json'));
@@ -315,16 +336,60 @@ Description: ...`
     const count = keys.get(userId) || 0;
     msg.channel.send(`🔑 You have **${count}** key(s).`);
   }
+  // ⭐ SCRAP command
+  if (command === '!scrap') {
+    const index = parseInt(args[0]);
+    const userInv = inventories[userId] || [];
+    if (isNaN(index) || index < 1 || index > userInv.length) {
+      return msg.reply('Usage: `!scrap <itemNumber>`');
+    }
 
-  if (command === '!givekeys') {
-    if (!ADMIN_IDS.includes(userId)) return msg.reply('❌ No permission.');
-    const target = args[0]?.replace(/[<@!>]/g, '');
-    const amount = parseInt(args[1]);
-    if (!target || isNaN(amount)) return msg.reply('Usage: `!givekeys @user amount`');
-    const current = keys.get(target) || 0;
-    keys.set(target, current + amount);
-    msg.channel.send(`✅ Gave ${amount} key(s) to <@${target}>.`);
+    const item = userInv.splice(index - 1, 1)[0];
+    const value = getScrapValue(item.rarity);
+    points[userId] = (points[userId] || 0) + value;
+
+    saveAll();
+    msg.reply(`♻️ Scrapped ${item.emoji} **"${item.name}"** for **${value}** points!`);
   }
+
+  // ⭐ POINTS command
+  if (command === '!points') {
+    const balance = points[userId] || 0;
+    msg.reply(`💠 You have **${balance}** points.`);
+  }
+
+  // ⭐ REDEEMKEYS command
+  if (command === '!redeemkeys') {
+    const amount = parseInt(args[0]);
+    if (isNaN(amount) || amount < 1) {
+      return msg.reply('Usage: `!redeemkeys <amount>`');
+    }
+
+    const cost = 100 * amount;
+    const balance = points[userId] || 0;
+
+    if (balance < cost) {
+      return msg.reply(`❌ You need **${cost}** points to redeem **${amount}** key(s). You only have **${balance}**.`);
+    }
+
+    points[userId] -= cost;
+    keys.set(userId, (keys.get(userId) || 0) + amount);
+    saveAll();
+    msg.reply(`✅ Redeemed **${amount}** key(s) for **${cost}** points!`);
+  }
+
+if (command === '!givekeys') {
+  const hasKeyPermission = msg.member.roles.cache.some(role => KEYMASTER_ROLE_IDS.includes(role.id));
+  if (!hasKeyPermission) return msg.reply('❌ You don\'t have permission to give keys.');
+
+  const target = args[0]?.replace(/[<@!>]/g, '');
+  const amount = parseInt(args[1]);
+  if (!target || isNaN(amount)) return msg.reply('Usage: `!givekeys @user amount`');
+
+  const current = keys.get(target) || 0;
+  keys.set(target, current + amount);
+  msg.channel.send(`✅ Gave ${amount} key(s) to <@${target}>.`);
+}
 
   if (command === '!help') {
     const isAdmin = ADMIN_IDS.includes(userId);
@@ -334,11 +399,10 @@ Description: ...`
       `📦 \`!inventory\` — View your personal loot inventory\n` +
       `🏆 \`!community\` — See the top 10 loot scores\n` +
       `🔑 \`!keys\` — Check how many keys you have\n` +
-      `🕵️ \`!view @user\` — View another user’s inventory\n` +
-      `📌 \`!setchannel\` — Set this channel for loot drops\n`;
+      `🕵️ \`!view @user\` — View another user’s inventory\n`;
 
     if (isAdmin) {
-      helpText += `\n🔧 **Admin Only**\n💠 \`!drop\` — Manually spawn a loot chest\n➕ \`!givekeys @user <amount>\` — Grant keys to any user\n`;
+      helpText += `\n🔧 **Admin Only**\n💠 \`!drop\` — Manually spawn a loot chest\n➕ \`!givekeys @user <amount>\` — Grant keys to any user\n📌 \`!setchannel\` — Set this channel for loot drops\n`;
     }
 
     msg.reply(helpText);
