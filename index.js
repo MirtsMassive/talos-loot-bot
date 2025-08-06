@@ -7,6 +7,10 @@ const fetch = require('node-fetch').default;
 // ✅ Check that OPENAI_API_KEY is present before creating the OpenAI client
 console.log("🔑 OPENAI_API_KEY loaded:", !!process.env.OPENAI_API_KEY);
 
+if (command === '!drop')
+  console.log(`!drop command received from ${msg.author.username}`);
+  // ...
+
 if (!process.env.OPENAI_API_KEY) {
   console.error("❌ OPENAI_API_KEY is not set in environment variables.");
   process.exit(1); // 🔴 Stop the app before it crashes
