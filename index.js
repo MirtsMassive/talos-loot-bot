@@ -265,9 +265,9 @@ if (chest.claimedBy && chest.claimedBy !== userId && now - chest.timestamp < fiv
         model: 'gpt-4o',
         messages: [{
           role: 'user',
-          content: `Create 3 unique fantasy loot items for a ${chest.rarity} chest. Each should include:
+          content: `Create 2 unique fantasy loot items for a ${chest.rarity} chest. Each should include:
 - Name (1-4 words)
-- Description (max 40 words)
+- Description (max 35 words)
 - Score: number between 10000–99999
 
 Format:
@@ -283,7 +283,7 @@ Description: ...`
       const items = await Promise.all(lines.map(async (entry, idx) => {
         const [header, description] = entry.split('\n');
         const [, name, rarity, score] = header.match(/"(.*?)" \(Rarity: (\w+) \| Score: (\d+)\)/) || [];
-        const imagePrompt = `${description?.split(': ')[1]}. Fantasy item. No text, no characters.`;
+        const imagePrompt = `${description?.split(': ')[1]}. Fantasy item. No text, no characters in image.`;
         const imagePath = await generateImageFromPrompt(imagePrompt, `${chest.id}_item${idx + 1}.png`);
 
         return {
@@ -298,7 +298,7 @@ Description: ...`
       }));
 
       chest.items = items;
-      chest.claimedBy = userId;
+      chest.claimedBy = []; // Initialize as an empty array if it doesn’t exist
       keys.set(userId, userKeys - 1);
 
       const formatted = items.map(i =>
@@ -315,25 +315,36 @@ Description: ...`
     }
   }
 
-  if (command === '!claim') {
-    const number = parseInt(args[0]);
-    if (isNaN(number)) return msg.reply('Usage: `!claim <itemNumber>`');
+if (command === '!claim') {
+  const number = parseInt(args[0]);
+  if (isNaN(number)) return msg.reply('Usage: `!claim <itemNumber>`');
 
-    const chest = chests.find(c => c.claimedBy === userId && c.items?.length);
-    if (!chest) return msg.reply("❌ You don't have loot available to claim.");
-    if (inventories[userId]?.some(i => i.sourceChest === chest.id)) return msg.reply("🛑 You've already claimed from this chest.");
+  // Find the most recent unclaimed chest with items
+  const chest = [...chests]
+    .reverse()
+    .find(c => c.items?.length && !inventories[userId]?.some(i => i.sourceChest === c.id));
 
-    const item = chest.items.find(i => i.idx === number);
-    if (!item) return msg.reply("❌ Invalid item number.");
+  if (!chest) return msg.reply("❌ You don't have loot available to claim.");
 
-    const claimedItem = { ...item, sourceChest: chest.id };
-    if (!inventories[userId]) inventories[userId] = [];
-    inventories[userId].push(claimedItem);
-    communityInventory.push({ ...claimedItem, user: msg.author.username });
-    saveAll();
+  if (!chest.claimedBy) chest.claimedBy = [];
 
-    msg.channel.send(`✅ Claimed ${item.emoji} **"${item.name}"**!`);
+  if (chest.claimedBy.includes(userId)) {
+    return msg.reply("🛑 You've already claimed from this chest.");
   }
+
+  const item = chest.items.find(i => i.idx === number);
+  if (!item) return msg.reply("❌ Invalid item number.");
+
+  const claimedItem = { ...item, sourceChest: chest.id };
+  if (!inventories[userId]) inventories[userId] = [];
+  inventories[userId].push(claimedItem);
+  communityInventory.push({ ...claimedItem, user: msg.author.username });
+
+  chest.claimedBy.push(userId); // Add user to claimed list
+  saveAll();
+
+  msg.channel.send(`✅ Claimed ${item.emoji} **"${item.name}"**!`);
+}
 
   if (command === '!inventory') {
     const inv = inventories[userId] || [];
