@@ -128,44 +128,56 @@ async function generateChestDescription(rarity) {
 }
 
 async function dropChest(guildId, manual = false) {
-  const rarity = rollRarity();
-  const score = getRarityScore(rarity);
-  const desc = await generateChestDescription(rarity);
-  const id = Date.now().toString();
+  try {
+    const rarity = rollRarity();
+    const score = getRarityScore(rarity);
+    const desc = await generateChestDescription(rarity);
+    const id = Date.now().toString();
 
-  const chestPrompt = `A fantasy loot chest of ${rarity} rarity. ${desc}`;
-  const imagePath = await generateImageFromPrompt(chestPrompt, `${id}_chest.png`);
+    const chestPrompt = `A fantasy loot chest of ${rarity} rarity. ${desc}`;
+    const imagePath = await generateImageFromPrompt(chestPrompt, `${id}_chest.png`);
 
-  const chest = {
-    id,
-    rarity,
-    score,
-    desc,
-    imagePath,
-    claimedBy: null,
-    items: [],
-    guildId,                // ✅ Add a comma here
-    timestamp: Date.now(),  // ✅ Now this line is valid
-  };
+    const chest = {
+      id,
+      rarity,
+      score,
+      desc,
+      imagePath,
+      claimedBy: null,
+      items: [],
+      guildId,
+      timestamp: Date.now(),
+    };
 
-  chests.push(chest);
+    chests.push(chest);
+    console.log(`📦 Chest created with ID ${id}`);
 
-  const channelId = serverConfig[guildId];
-  if (!channelId) return;
+    const channelId = serverConfig[guildId];
+    if (!channelId) {
+      console.warn(`⚠️ No drop channel set for guild ${guildId}`);
+      return;
+    }
 
-  const channel = await client.channels.fetch(channelId);
-  if (!channel) return;
+    const channel = await client.channels.fetch(channelId).catch(err => {
+      console.error(`❌ Failed to fetch channel ${channelId}:`, err);
+      return null;
+    });
+    if (!channel) return;
 
-  const image = new AttachmentBuilder(imagePath);
-  channel.send({
-    content:
-      `🎁 **A loot chest drops!**\n` +
-      `**ID:** \`${id}\`\n` +
-      `**Rarity:** ${rarity} *(Score: ${score})*\n` +
-      `**Description:** ${desc}\n\n` +
-      `Use \`!open ${id}\` to open it (costs 1 key).`,
-    files: [image]
-  });
+    const image = new AttachmentBuilder(imagePath);
+    await channel.send({
+      content:
+        `🎁 **A loot chest drops!**\n` +
+        `**ID:** \`${id}\`\n` +
+        `**Rarity:** ${rarity} *(Score: ${score})*\n` +
+        `**Description:** ${desc}\n\n` +
+        `Use \`!open ${id}\` to open it (costs 1 key).`,
+      files: [image]
+    });
+    console.log(`📤 Chest ${id} sent successfully.`);
+  } catch (err) {
+    console.error(`❌ Error in dropChest for guild ${guildId}:`, err);
+  }
 }
 
 client.on('messageCreate', async (msg) => {
@@ -178,12 +190,21 @@ client.on('messageCreate', async (msg) => {
 
 if (command === '!usedrop') {
   const userKeys = keys.get(userId) || 0;
-  if (userKeys < 5) return msg.reply('❌ You need **5 keys** to summon a chest.');
+
+  if (userKeys < 5) {
+    return msg.reply('❌ You need **5 keys** to summon a chest.');
+  }
 
   keys.set(userId, userKeys - 5);
+  saveAll();
+
+  msg.reply('🧿 A chest has been summoned using your keys!');
+  console.log(`!usedrop triggered by ${msg.author.username}`);
+
   await dropChest(guildId, true);
-  msg.channel.send('🔮 A chest has been summoned using your keys!');
+  console.log(`dropChest completed for ${msg.author.username}`);
 }
+
   if (command === '!drop') {
     console.log(`!drop command received from ${msg.author.username}`);
 
