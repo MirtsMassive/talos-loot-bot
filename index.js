@@ -23,7 +23,7 @@ const client = new Client({
 });
 
 const TOKEN = process.env.DISCORD_TOKEN;
-const ALLOWED_ROLE_IDS = ['622845214247223366','454313119406227457','749118349874823260']; // Replace with actual role IDs
+const ALLOWED_ROLE_IDS = ['622845214247223366','454313119406227457','749118349874823260','1402331068899790918']; // Replace with actual role IDs
 
 
 const chestRarities = ['Common', 'Uncommon', 'Rare', 'Epic', 'Legendary', 'Mythic', 'Artifact'];
