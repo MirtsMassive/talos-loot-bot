@@ -156,7 +156,7 @@ async function dropChest(guildId, manual = false) {
     const id = Date.now().toString();
 
     const chestPrompt = `A fantasy loot chest of ${rarity} rarity. ${desc}`;
-    const imagePath = await generateImageFromPrompt(chestPrompt, `${id}_chest.png`);
+    const imagePath = await generateImageFromPrompt(chestPrompt, `${id}_chest.png`,chest.rarity);
 
     const chest = {
       id,
