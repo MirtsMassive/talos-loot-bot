@@ -3,9 +3,12 @@ const { OpenAI } = require('openai');
 const fs = require('fs');
 const path = require('path');
 const fetch = require('node-fetch').default;
+const { createCanvas, loadImage } = require('canvas');
 
 // ✅ Check that OPENAI_API_KEY is present before creating the OpenAI client
 console.log("🔑 OPENAI_API_KEY loaded:", !!process.env.OPENAI_API_KEY);
+console.log("🖼️ Generating image for:", rarity);
+console.log("🗂️ Frame path:", `./frames/frame_${rarity.toLowerCase()}.png`);
 
 if (!process.env.OPENAI_API_KEY) {
   console.error("❌ OPENAI_API_KEY is not set in environment variables.");
@@ -99,7 +102,9 @@ function getColor(rarity) {
   return rarityColors[rarity] || '⬜';
 }
 
-async function generateImageFromPrompt(prompt, fileName) {
+const sharp = require('sharp'); // Make sure this is imported at the top
+
+async function generateImageFromPrompt(prompt, fileName, rarity) {
   const image = await openai.images.generate({
     model: 'dall-e-3',
     prompt: prompt + ' No text or labels in the image.',
@@ -111,9 +116,27 @@ async function generateImageFromPrompt(prompt, fileName) {
   const url = image.data[0].url;
   const res = await fetch(url);
   const buffer = await res.arrayBuffer();
-  const filePath = path.join('temp', fileName);
-  fs.writeFileSync(filePath, Buffer.from(buffer));
-  return filePath;
+
+  const baseImage = await loadImage(Buffer.from(buffer));
+  const framePath = `./frames/frame_${rarity.toLowerCase()}.png`;
+
+  if (!fs.existsSync(framePath)) {
+    console.warn(`❗ Frame not found for rarity: ${rarity}`);
+  }
+
+  const frameImage = await loadImage(framePath);
+
+  const canvas = createCanvas(1024, 1024);
+  const ctx = canvas.getContext('2d');
+
+  ctx.drawImage(baseImage, 0, 0, 1024, 1024); // Base image
+  ctx.drawImage(frameImage, 0, 0, 1024, 1024); // Frame overlay
+
+  const finalBuffer = canvas.toBuffer('image/png');
+  const finalPath = path.join('temp', fileName);
+  fs.writeFileSync(finalPath, finalBuffer);
+
+  return finalPath;
 }
 
 async function generateChestDescription(rarity) {
@@ -284,7 +307,7 @@ Description: ...`
         const [header, description] = entry.split('\n');
         const [, name, rarity, score] = header.match(/"(.*?)" \(Rarity: (\w+) \| Score: (\d+)\)/) || [];
         const imagePrompt = `${description?.split(': ')[1]}. Fantasy item. No text, no characters in image.`;
-        const imagePath = await generateImageFromPrompt(imagePrompt, `${chest.id}_item${idx + 1}.png`);
+       const imagePath = await generateImageFromPrompt(imagePrompt, `${chest.id}_item${idx + 1}.png`, chest.rarity);
 
         return {
           idx: idx + 1,
