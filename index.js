@@ -7,8 +7,6 @@ const { createCanvas, loadImage } = require('canvas');
 
 // ✅ Check that OPENAI_API_KEY is present before creating the OpenAI client
 console.log("🔑 OPENAI_API_KEY loaded:", !!process.env.OPENAI_API_KEY);
-console.log("🖼️ Generating image for:", rarity);
-console.log("🗂️ Frame path:", `./frames/frame_${rarity.toLowerCase()}.png`);
 
 if (!process.env.OPENAI_API_KEY) {
   console.error("❌ OPENAI_API_KEY is not set in environment variables.");
