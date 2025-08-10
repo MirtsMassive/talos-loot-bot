@@ -53,6 +53,13 @@ if (fs.existsSync('inventory.json')) inventories = JSON.parse(fs.readFileSync('i
 if (fs.existsSync('community.json')) communityInventory = JSON.parse(fs.readFileSync('community.json'));
 if (fs.existsSync('points.json')) points = JSON.parse(fs.readFileSync('points.json'));
 
+// 🔁 Description history for uniqueness
+let descHistory = [];
+if (fs.existsSync('desc_history.json')) {
+  try { descHistory = JSON.parse(fs.readFileSync('desc_history.json', 'utf8')) || []; }
+  catch { descHistory = []; }
+}
+
 // ensure temp dir exists for images
 const TEMP_DIR = path.join(process.cwd(), 'temp');
 if (!fs.existsSync(TEMP_DIR)) {
@@ -64,6 +71,8 @@ function saveAll() {
   fs.writeFileSync('inventory.json', JSON.stringify(inventories, null, 2));
   fs.writeFileSync('community.json', JSON.stringify(communityInventory, null, 2));
   fs.writeFileSync('points.json', JSON.stringify(points, null, 2));
+  // keep last 200 descriptions
+  fs.writeFileSync('desc_history.json', JSON.stringify(descHistory.slice(-200), null, 2));
 }
 
 function getScrapValue(rarity) {
@@ -191,33 +200,89 @@ async function generateImageFromPrompt(prompt, fileName) {
   }
 }
 
-// ====================== TEXT: RARITY-SCALED CHEST DESCRIPTION (≤60 words) ======================
+// ====================== DESCRIPTION UNIQUENESS HELPERS ======================
+function normalizeForSim(s) {
+  return (s || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length > 3);
+}
+
+function jaccardSim(a, b) {
+  const A = new Set(normalizeForSim(a));
+  const B = new Set(normalizeForSim(b));
+  if (!A.size || !B.size) return 0;
+  let inter = 0;
+  for (const w of A) if (B.has(w)) inter++;
+  return inter / (A.size + B.size - inter);
+}
+
+// ====================== TEXT: RARITY-SCALED CHEST DESCRIPTION (≤60 words, exterior-only, unique) ======================
 async function generateChestDescription(rarity) {
   const toneByRarity = {
-    common:    "simple, sturdy, practical",
-    uncommon:  "engraved with faint runes and modest detailing",
-    rare:      "ornate, etched with glowing sigils, masterfully crafted",
-    epic:      "grand, humming with enchantment, filigreed and resplendent",
-    legendary: "magnificent, ancient power coiled within, jeweled and radiant",
-    mythic:    "otherworldly, alive with primal magic, steeped in lore",
-    artifact:  "divine, god-forged, surrounded by cosmic light and living spellwork"
+    common:    "plain, sturdy, practical; modest imagery and grounded diction",
+    uncommon:  "subtly magical; tasteful ornament; a hint of wonder",
+    rare:      "ornate and luminous; refined imagery; confident, evocative tone",
+    epic:      "grand, radiant, richly textured; sweeping, awe-leaning diction",
+    legendary: "majestic, ancient power; jeweled, radiant; potent and memorable turns of phrase",
+    mythic:    "otherworldly, primal magic; celestial metaphors; myth-forged gravitas",
+    artifact:  "divine, god-wrought; cosmic imagery; language of destiny and reverence"
   };
-  const tone = toneByRarity[rarity.toLowerCase()] || "fantastical";
+  const tone = toneByRarity[rarity.toLowerCase()] || "fantastical yet concise";
 
-  const prompt = `
-Write a single-paragraph fantasy chest description for a ${rarity} chest.
-Constraints:
-- 45–60 words (concise but vivid)
-- No item spoilers
-- Language intensity should match this guidance: ${tone}
+  const rules = `
+Rules:
+- 45–60 words.
+- Describe EXTERIOR ONLY. Do NOT mention opening, lids, the inside/interior, contents, or what it holds.
+- No future actions or instructions.
+- Vary syntax and imagery; avoid repeated phrasing and clichés.
+- Include one vivid sensory detail about surface, aura, or surroundings (not interior).
 Return ONLY the description text.`;
-  const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
-    messages: [{ role: 'user', content: prompt }],
-    max_tokens: 160,
-    temperature: 0.8
-  });
-  return response.choices[0].message.content.trim();
+
+  const prompt = `Write a single-paragraph fantasy chest description for a ${rarity} chest.
+Style guidance by rarity: ${tone}
+${rules}`.trim();
+
+  const MAX_TRIES = 4;
+  const SIM_THRESHOLD = 0.58;
+  const recent = descHistory.slice(-80);
+
+  for (let i = 0; i < MAX_TRIES; i++) {
+    const resp = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 180,
+      temperature: 0.9,
+      presence_penalty: 0.6,
+      frequency_penalty: 0.4
+    });
+
+    let text = (resp.choices?.[0]?.message?.content || '').trim();
+
+    // enforce 60-word cap
+    const words = text.split(/\s+/);
+    if (words.length > 60) {
+      text = words.slice(0, 60).join(' ').replace(/[.,;:!?-]*$/, '.') ;
+    }
+
+    // block interior/opening mentions
+    const banned = /\b(open|opened|opening|inside|interior|within|contents?|reveals?|revealing|contains?)\b/i;
+    if (banned.test(text)) continue;
+
+    const tooSimilar = recent.some(h => jaccardSim(h.text, text) >= SIM_THRESHOLD);
+    if (!tooSimilar) {
+      descHistory.push({ rarity, text, ts: Date.now() });
+      saveAll();
+      return text;
+    }
+  }
+
+  // Fallback (should rarely trigger)
+  const fallbackText = `${rarity} chest stands weathered yet distinct, its exterior marked by craft and a faint aura of promise.`;
+  descHistory.push({ rarity, text: fallbackText, ts: Date.now() });
+  saveAll();
+  return fallbackText;
 }
 
 // ====================== DROP CHEST ======================
