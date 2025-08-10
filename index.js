@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, AttachmentBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, AttachmentBuilder } = require('discord.js'); 
 const { OpenAI } = require('openai');
 const fs = require('fs');
 const path = require('path');
@@ -10,7 +10,7 @@ console.log("🔑 OPENAI_API_KEY loaded:", !!process.env.OPENAI_API_KEY);
 
 if (!process.env.OPENAI_API_KEY) {
   console.error("❌ OPENAI_API_KEY is not set in environment variables.");
-  process.exit(1); // 🔴 Stop the app before it crashes
+  process.exit(1);
 }
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -24,8 +24,8 @@ const client = new Client({
 });
 
 const TOKEN = process.env.DISCORD_TOKEN;
-const ALLOWED_ROLE_IDS = ['622845214247223366','454313119406227457','749118349874823260','1402331068899790918']; // Replace with actual role IDs
-const KEYMASTER_ROLE_IDS = ['622845214247223366','454313119406227457']; // Only roles allowed to give keys
+const ALLOWED_ROLE_IDS = ['622845214247223366','454313119406227457','749118349874823260','1402331068899790918'];
+const KEYMASTER_ROLE_IDS = ['622845214247223366','454313119406227457'];
 
 const chestRarities = ['Common', 'Uncommon', 'Rare', 'Epic', 'Legendary', 'Mythic', 'Artifact'];
 const rarityChances = [40, 25, 15, 10, 5, 4.5, 0.5];
@@ -46,7 +46,18 @@ let communityInventory = [];
 let userCooldowns = new Map();
 let userOpenLock = new Set();
 let points = {};
+
+let serverConfig = {};
+if (fs.existsSync('serverConfig.json')) serverConfig = JSON.parse(fs.readFileSync('serverConfig.json'));
+if (fs.existsSync('inventory.json')) inventories = JSON.parse(fs.readFileSync('inventory.json'));
+if (fs.existsSync('community.json')) communityInventory = JSON.parse(fs.readFileSync('community.json'));
 if (fs.existsSync('points.json')) points = JSON.parse(fs.readFileSync('points.json'));
+
+// ensure temp dir exists for images
+const TEMP_DIR = path.join(process.cwd(), 'temp');
+if (!fs.existsSync(TEMP_DIR)) {
+  fs.mkdirSync(TEMP_DIR, { recursive: true });
+}
 
 function saveAll() {
   fs.writeFileSync('serverConfig.json', JSON.stringify(serverConfig, null, 2));
@@ -65,17 +76,6 @@ function getScrapValue(rarity) {
     Mythic: 100,
     Artifact: 200
   }[rarity] || 5;
-}
-
-let serverConfig = {};
-if (fs.existsSync('serverConfig.json')) serverConfig = JSON.parse(fs.readFileSync('serverConfig.json'));
-if (fs.existsSync('inventory.json')) inventories = JSON.parse(fs.readFileSync('inventory.json'));
-if (fs.existsSync('community.json')) communityInventory = JSON.parse(fs.readFileSync('community.json'));
-
-function saveAll() {
-  fs.writeFileSync('serverConfig.json', JSON.stringify(serverConfig, null, 2));
-  fs.writeFileSync('inventory.json', JSON.stringify(inventories, null, 2));
-  fs.writeFileSync('community.json', JSON.stringify(communityInventory, null, 2));
 }
 
 function rollRarity() {
@@ -100,41 +100,54 @@ function getColor(rarity) {
   return rarityColors[rarity] || '⬜';
 }
 
-const sharp = require('sharp'); // Make sure this is imported at the top
+const sharp = require('sharp'); // (not currently used, but kept)
 
+// ---- Image generation (robust) ----
 async function generateImageFromPrompt(prompt, fileName, rarity) {
-  const image = await openai.images.generate({
-    model: 'dall-e-3',
-    prompt: prompt + ' No text or labels in the image.',
-    n: 1,
-    size: '1024x1024',
-    response_format: 'url'
-  });
+  try {
+    const image = await openai.images.generate({
+      model: 'dall-e-3',
+      prompt: `${prompt} No text or labels in the image.`,
+      n: 1,
+      size: '1024x1024',
+      response_format: 'url'
+    });
 
-  const url = image.data[0].url;
-  const res = await fetch(url);
-  const buffer = await res.arrayBuffer();
+    const url = image.data[0].url;
+    const res = await fetch(url);
+    const buffer = await res.arrayBuffer();
 
-  const baseImage = await loadImage(Buffer.from(buffer));
-  const framePath = `./frames/frame_${rarity.toLowerCase()}.png`;
+    const baseImage = await loadImage(Buffer.from(buffer));
 
-  if (!fs.existsSync(framePath)) {
-    console.warn(`❗ Frame not found for rarity: ${rarity}`);
+    // rarity may be undefined if caller forgot; guard it
+    const rarityKey = (rarity || 'Common').toLowerCase();
+    const framePath = path.join('frames', `frame_${rarityKey}.png`);
+
+    // compose
+    const canvas = createCanvas(1024, 1024);
+    const ctx = canvas.getContext('2d');
+
+    ctx.drawImage(baseImage, 0, 0, 1024, 1024);
+
+    if (fs.existsSync(framePath)) {
+      const frameImage = await loadImage(framePath);
+      ctx.drawImage(frameImage, 0, 0, 1024, 1024);
+    } else {
+      console.warn(`❗ Frame not found for rarity: ${rarityKey} (looked for ${framePath})`);
+    }
+
+    const finalBuffer = canvas.toBuffer('image/png');
+    const finalPath = path.join(TEMP_DIR, fileName);
+    fs.writeFileSync(finalPath, finalBuffer);
+
+    return finalPath;
+  } catch (err) {
+    console.error('❌ Error generating image:', err);
+    // still write a placeholder to avoid crashes later
+    const fallbackPath = path.join(TEMP_DIR, fileName);
+    fs.writeFileSync(fallbackPath, Buffer.from(''));
+    return fallbackPath;
   }
-
-  const frameImage = await loadImage(framePath);
-
-  const canvas = createCanvas(1024, 1024);
-  const ctx = canvas.getContext('2d');
-
-  ctx.drawImage(baseImage, 0, 0, 1024, 1024); // Base image
-  ctx.drawImage(frameImage, 0, 0, 1024, 1024); // Frame overlay
-
-  const finalBuffer = canvas.toBuffer('image/png');
-  const finalPath = path.join('temp', fileName);
-  fs.writeFileSync(finalPath, finalBuffer);
-
-  return finalPath;
 }
 
 async function generateChestDescription(rarity) {
@@ -148,6 +161,7 @@ async function generateChestDescription(rarity) {
   return response.choices[0].message.content.trim();
 }
 
+// ---- DROP CHEST ----
 async function dropChest(guildId, manual = false) {
   try {
     const rarity = rollRarity();
@@ -156,15 +170,17 @@ async function dropChest(guildId, manual = false) {
     const id = Date.now().toString();
 
     const chestPrompt = `A fantasy loot chest of ${rarity} rarity. ${desc}`;
-    const imagePath = await generateImageFromPrompt(chestPrompt, `${id}_chest.png`,chest.rarity);
+    // ✅ pass rarity so frame overlay works; avoids undefined errors
+    const imagePath = await generateImageFromPrompt(chestPrompt, `${id}_chest.png`, rarity);
 
+    // ✅ define chest before any usage
     const chest = {
       id,
       rarity,
       score,
       desc,
       imagePath,
-      claimedBy: null,
+      claimedBy: null,        // later becomes array after items generated
       items: [],
       guildId,
       timestamp: Date.now(),
@@ -209,22 +225,22 @@ client.on('messageCreate', async (msg) => {
   const userId = msg.author.id;
   const guildId = msg.guild.id;
 
-if (command === '!usedrop') {
-  const userKeys = keys.get(userId) || 0;
+  if (command === '!usedrop') {
+    const userKeys = keys.get(userId) || 0;
 
-  if (userKeys < 5) {
-    return msg.reply('❌ You need **5 keys** to summon a chest.');
+    if (userKeys < 5) {
+      return msg.reply('❌ You need **5 keys** to summon a chest.');
+    }
+
+    keys.set(userId, userKeys - 5);
+    saveAll();
+
+    msg.reply('🧿 A chest has been summoned using your keys!');
+    console.log(`!usedrop triggered by ${msg.author.username}`);
+
+    await dropChest(guildId, true);
+    console.log(`dropChest completed for ${msg.author.username}`);
   }
-
-  keys.set(userId, userKeys - 5);
-  saveAll();
-
-  msg.reply('🧿 A chest has been summoned using your keys!');
-  console.log(`!usedrop triggered by ${msg.author.username}`);
-
-  await dropChest(guildId, true);
-  console.log(`dropChest completed for ${msg.author.username}`);
-}
 
   if (command === '!drop') {
     console.log(`!drop command received from ${msg.author.username}`);
@@ -246,6 +262,7 @@ if (command === '!usedrop') {
     saveAll();
     return msg.reply(`✅ This channel is now set as the drop zone for this server.`);
   }
+
   if (command === '!open') {
     const now = Date.now();
 
@@ -261,19 +278,17 @@ if (command === '!usedrop') {
 
     const id = args[0];
     const chest = chests.find(c => c.id === id && c.guildId === guildId);
-if (!chest) return msg.reply('❌ That chest does not exist.');
+    if (!chest) return msg.reply('❌ That chest does not exist.');
 
-if (chest.claimedBy && chest.claimedBy !== userId) {
-  return msg.reply('🛑 This chest has already been opened by someone else.');
-}
+    if (chest.claimedBy && chest.claimedBy !== userId) {
+      return msg.reply('🛑 This chest has already been opened by someone else.');
+    }
 
-// If chest was opened by someone else less than 5 mins ago, block it
-const fiveMinutes = 5 * 60 * 1000;
-
-if (chest.claimedBy && chest.claimedBy !== userId && now - chest.timestamp < fiveMinutes) {
-  const remaining = Math.ceil((fiveMinutes - (now - chest.timestamp)) / 1000);
-  return msg.reply(`⏳ This chest was opened recently. Try again in ${remaining}s.`);
-}
+    const fiveMinutes = 5 * 60 * 1000;
+    if (chest.claimedBy && chest.claimedBy !== userId && now - chest.timestamp < fiveMinutes) {
+      const remaining = Math.ceil((fiveMinutes - (now - chest.timestamp)) / 1000);
+      return msg.reply(`⏳ This chest was opened recently. Try again in ${remaining}s.`);
+    }
 
     const userKeys = keys.get(userId) || 0;
     if (userKeys < 1) return msg.reply('🔐 You have **0** keys.');
@@ -302,31 +317,38 @@ Description: ...`
       const lines = loot.choices[0].message.content.trim().split(/\n(?=\d+\.)/g);
 
       const items = await Promise.all(lines.map(async (entry, idx) => {
-        const [header, description] = entry.split('\n');
-        const [, name, rarity, score] = header.match(/"(.*?)" \(Rarity: (\w+) \| Score: (\d+)\)/) || [];
-        const imagePrompt = `${description?.split(': ')[1]}. Fantasy item. No text, no characters in image.`;
-       const imagePath = await generateImageFromPrompt(imagePrompt, `${chest.id}_item${idx + 1}.png`, chest.rarity);
+        const [header, description] = (entry || '').split('\n');
+
+        const match = header && header.match(/"(.*?)"\s*\(Rarity:\s*(\w+)\s*\|\s*Score:\s*(\d+)\)/);
+        const name = match?.[1] || `Unknown Item ${idx + 1}`;
+        const rarity = match?.[2] || chest.rarity;
+        const score = parseInt(match?.[3] || `${getRarityScore(rarity)}`, 10);
+
+        const shortDesc = (description || '').split(': ')[1] || 'Mysterious artifact from distant storms.';
+        const imagePrompt = `${shortDesc}. Fantasy item. No text, no characters in image.`;
+
+        const imagePath = await generateImageFromPrompt(imagePrompt, `${chest.id}_item${idx + 1}.png`, rarity);
 
         return {
           idx: idx + 1,
           name,
           rarity,
           emoji: getColor(rarity),
-          score: parseInt(score),
-          description: description?.split(': ')[1] || '',
+          score: Number.isFinite(score) ? score : getRarityScore(rarity),
+          description: shortDesc,
           imagePath
         };
       }));
 
       chest.items = items;
-      chest.claimedBy = []; // Initialize as an empty array if it doesn’t exist
+      chest.claimedBy = []; // initialize as list for claim tracking
       keys.set(userId, userKeys - 1);
 
       const formatted = items.map(i =>
         `**${i.idx}.** ${i.emoji} "${i.name}" (Rarity: ${i.rarity} | Score: ${i.score})\n${i.description}`
       ).join('\n\n');
 
-      const itemFiles = items.map(i => new AttachmentBuilder(i.imagePath));
+      const itemFiles = items.map(i => new AttachmentBuilder(i.imagePath).setName(path.basename(i.imagePath)));
       msg.channel.send({ content: `🗝️ You opened the chest! Use \`!claim <itemNumber>\` to take 1 item.\n\n${formatted}`, files: itemFiles });
     } catch (err) {
       console.error(err);
@@ -336,36 +358,36 @@ Description: ...`
     }
   }
 
-if (command === '!claim') {
-  const number = parseInt(args[0]);
-  if (isNaN(number)) return msg.reply('Usage: `!claim <itemNumber>`');
+  if (command === '!claim') {
+    const number = parseInt(args[0], 10);
+    if (isNaN(number)) return msg.reply('Usage: `!claim <itemNumber>`');
 
-  // Find the most recent unclaimed chest with items
-  const chest = [...chests]
-    .reverse()
-    .find(c => c.items?.length && !inventories[userId]?.some(i => i.sourceChest === c.id));
+    // Find the most recent unclaimed chest with items for this user context
+    const chest = [...chests]
+      .reverse()
+      .find(c => c.guildId === guildId && c.items?.length && !inventories[userId]?.some(i => i.sourceChest === c.id));
 
-  if (!chest) return msg.reply("❌ You don't have loot available to claim.");
+    if (!chest) return msg.reply("❌ You don't have loot available to claim.");
 
-  if (!chest.claimedBy) chest.claimedBy = [];
+    if (!chest.claimedBy) chest.claimedBy = [];
 
-  if (chest.claimedBy.includes(userId)) {
-    return msg.reply("🛑 You've already claimed from this chest.");
+    if (chest.claimedBy.includes(userId)) {
+      return msg.reply("🛑 You've already claimed from this chest.");
+    }
+
+    const item = chest.items.find(i => i.idx === number);
+    if (!item) return msg.reply("❌ Invalid item number.");
+
+    const claimedItem = { ...item, sourceChest: chest.id };
+    if (!inventories[userId]) inventories[userId] = [];
+    inventories[userId].push(claimedItem);
+    communityInventory.push({ ...claimedItem, user: msg.author.username });
+
+    chest.claimedBy.push(userId);
+    saveAll();
+
+    msg.channel.send(`✅ Claimed ${item.emoji} **"${item.name}"**!`);
   }
-
-  const item = chest.items.find(i => i.idx === number);
-  if (!item) return msg.reply("❌ Invalid item number.");
-
-  const claimedItem = { ...item, sourceChest: chest.id };
-  if (!inventories[userId]) inventories[userId] = [];
-  inventories[userId].push(claimedItem);
-  communityInventory.push({ ...claimedItem, user: msg.author.username });
-
-  chest.claimedBy.push(userId); // Add user to claimed list
-  saveAll();
-
-  msg.channel.send(`✅ Claimed ${item.emoji} **"${item.name}"**!`);
-}
 
   if (command === '!inventory') {
     const inv = inventories[userId] || [];
@@ -383,22 +405,22 @@ if (command === '!claim') {
   }
 
   if (command === '!view') {
-  const target = msg.mentions.users.first();
-  if (!target) return msg.reply('Usage: `!view @user`');
+    const target = msg.mentions.users.first();
+    if (!target) return msg.reply('Usage: `!view @user`');
 
-  const inv = inventories[target.id] || [];
-  if (!inv.length) return msg.reply(`📦 ${target.username}'s inventory is empty.`);
+    const inv = inventories[target.id] || [];
+    if (!inv.length) return msg.reply(`📦 ${target.username}'s inventory is empty.`);
 
-  const list = inv.map((i, idx) =>
-    `**${idx + 1}.** ${getColor(i.rarity)} "${i.name}" *(Rarity: ${i.rarity}, Score: ${i.score})*`
-  ).join('\n');
+    const list = inv.map((i, idx) =>
+      `**${idx + 1}.** ${getColor(i.rarity)} "${i.name}" *(Rarity: ${i.rarity}, Score: ${i.score})*`
+    ).join('\n');
 
-  const imageFiles = inv
-    .filter(i => i.imagePath && fs.existsSync(i.imagePath))
-    .map(i => new AttachmentBuilder(i.imagePath));
+    const imageFiles = inv
+      .filter(i => i.imagePath && fs.existsSync(i.imagePath))
+      .map(i => new AttachmentBuilder(i.imagePath));
 
-  msg.reply({ content: `🧾 **${target.username}'s Inventory:**\n${list}`, files: imageFiles });
-}
+    msg.reply({ content: `🧾 **${target.username}'s Inventory:**\n${list}`, files: imageFiles });
+  }
 
   if (command === '!community') {
     if (!communityInventory.length) return msg.channel.send("👥 No loot claimed yet.");
@@ -414,9 +436,10 @@ if (command === '!claim') {
     const count = keys.get(userId) || 0;
     msg.channel.send(`🔑 You have **${count}** key(s).`);
   }
+
   // ⭐ SCRAP command
   if (command === '!scrap') {
-    const index = parseInt(args[0]);
+    const index = parseInt(args[0], 10);
     const userInv = inventories[userId] || [];
     if (isNaN(index) || index < 1 || index > userInv.length) {
       return msg.reply('Usage: `!scrap <itemNumber>`');
@@ -430,6 +453,37 @@ if (command === '!claim') {
     msg.reply(`♻️ Scrapped ${item.emoji} **"${item.name}"** for **${value}** points!`);
   }
 
+  // ⭐ SCRAPALL command
+  if (command === '!scrapall') {
+    const userInv = inventories[userId] || [];
+    if (!userInv.length) return msg.reply("📦 Your inventory is already empty.");
+
+    // Tally points and counts by rarity
+    let totalPoints = 0;
+    const counts = {}; // { rarity: count }
+    for (const item of userInv) {
+      const val = getScrapValue(item.rarity);
+      totalPoints += val;
+      counts[item.rarity] = (counts[item.rarity] || 0) + 1;
+    }
+
+    // Award points and clear inventory
+    points[userId] = (points[userId] || 0) + totalPoints;
+    inventories[userId] = [];
+    saveAll();
+
+    // Make a readable breakdown
+    const breakdown = Object.entries(counts)
+      .sort((a, b) => (b[1] - a[1])) // most frequent first
+      .map(([rarity, count]) => `${getColor(rarity)} ${rarity} × ${count}`)
+      .join(', ');
+
+    msg.reply(
+      `♻️ Scrapped **${userInv.length}** item(s) for **${totalPoints}** points!\n` +
+      (breakdown ? `**Breakdown:** ${breakdown}` : '')
+    );
+  }
+
   // ⭐ POINTS command
   if (command === '!points') {
     const balance = points[userId] || 0;
@@ -438,7 +492,7 @@ if (command === '!claim') {
 
   // ⭐ REDEEMKEYS command
   if (command === '!redeemkeys') {
-    const amount = parseInt(args[0]);
+    const amount = parseInt(args[0], 10);
     if (isNaN(amount) || amount < 1) {
       return msg.reply('Usage: `!redeemkeys <amount>`');
     }
@@ -456,45 +510,46 @@ if (command === '!claim') {
     msg.reply(`✅ Redeemed **${amount}** key(s) for **${cost}** points!`);
   }
 
-if (command === '!givekeys') {
-  const hasKeyPermission = msg.member.roles.cache.some(role => KEYMASTER_ROLE_IDS.includes(role.id));
-  if (!hasKeyPermission) return msg.reply('❌ You don\'t have permission to give keys.');
+  if (command === '!givekeys') {
+    const hasKeyPermission = msg.member.roles.cache.some(role => KEYMASTER_ROLE_IDS.includes(role.id));
+    if (!hasKeyPermission) return msg.reply('❌ You don\'t have permission to give keys.');
 
-  const target = args[0]?.replace(/[<@!>]/g, '');
-  const amount = parseInt(args[1]);
-  if (!target || isNaN(amount)) return msg.reply('Usage: `!givekeys @user amount`');
+    const target = args[0]?.replace(/[<@!>]/g, '');
+    const amount = parseInt(args[1], 10);
+    if (!target || isNaN(amount)) return msg.reply('Usage: `!givekeys @user amount`');
 
-  const current = keys.get(target) || 0;
-  keys.set(target, current + amount);
-  msg.channel.send(`✅ Gave ${amount} key(s) to <@${target}>.`);
-}
-
-if (command === '!help') {
-  const hasRoleAccess = msg.member.roles.cache.some(role => ALLOWED_ROLE_IDS.includes(role.id));
-  const hasKeyPermission = msg.member.roles.cache.some(role => KEYMASTER_ROLE_IDS.includes(role.id));
-
-  let helpText = `📜 **TALOS Loot Bot Commands**\n\n` +
-    `🎁 \`!open <chestId>\` — Open a chest using 1 key\n` +
-    `🧾 \`!claim <itemNumber>\` — Claim an item from an opened chest\n` +
-    `📦 \`!inventory\` — View your personal loot inventory\n` +
-    `♻️ \`!scrap <itemNumber>\` — Scrap an item for points\n` +
-    `💠 \`!points\` — View your point balance\n` +
-    `🔁 \`!redeemkeys <amount>\` — Convert points into keys\n` +
-    `🕵️ \`!view @user\` — View another user’s inventory\n` +
-    `🏆 \`!community\` — See the top 10 loot scores\n` +
-    `🔮 \`!usedrop\` — Use 5 keys to summon a loot chest\n` +
-    `🔑 \`!keys\` — Check your key count\n`;
-
-  if (hasRoleAccess) {
-    helpText += `\n💠 \`!drop\` — Manually spawn a loot chest\n📌 \`!setchannel\` — Set this channel as the drop zone\n`;
+    const current = keys.get(target) || 0;
+    keys.set(target, current + amount);
+    msg.channel.send(`✅ Gave ${amount} key(s) to <@${target}>.`);
   }
 
-  if (hasKeyPermission) {
-    helpText += `➕ \`!givekeys @user <amount>\` — Grant keys to another user\n`;
-  }
+  if (command === '!help') {
+    const hasRoleAccess = msg.member.roles.cache.some(role => ALLOWED_ROLE_IDS.includes(role.id));
+    const hasKeyPermission = msg.member.roles.cache.some(role => KEYMASTER_ROLE_IDS.includes(role.id));
 
-  msg.reply(helpText);
-}
+    let helpText = `📜 **TALOS Loot Bot Commands**\n\n` +
+      `🎁 \`!open <chestId>\` — Open a chest using 1 key\n` +
+      `🧾 \`!claim <itemNumber>\` — Claim an item from an opened chest\n` +
+      `📦 \`!inventory\` — View your personal loot inventory\n` +
+      `♻️ \`!scrap <itemNumber>\` — Scrap an item for points\n` +
+      `♻️ \`!scrapall\` — Scrap your entire inventory for points\n` +
+      `💠 \`!points\` — View your point balance\n` +
+      `🔁 \`!redeemkeys <amount>\` — Convert points into keys\n` +
+      `🕵️ \`!view @user\` — View another user’s inventory\n` +
+      `🏆 \`!community\` — See the top 10 loot scores\n` +
+      `🔮 \`!usedrop\` — Use 5 keys to summon a loot chest\n` +
+      `🔑 \`!keys\` — Check your key count\n`;
+
+    if (hasRoleAccess) {
+      helpText += `\n💠 \`!drop\` — Manually spawn a loot chest\n📌 \`!setchannel\` — Set this channel as the drop zone\n`;
+    }
+
+    if (hasKeyPermission) {
+      helpText += `➕ \`!givekeys @user <amount>\` — Grant keys to another user\n`;
+    }
+
+    msg.reply(helpText);
+  }
 });
 
 client.once('ready', () => {
@@ -508,6 +563,11 @@ client.once('ready', () => {
       const randomMinute = Math.floor(Math.random() * 60);
       const timestamp = new Date();
       timestamp.setHours(randomHour, randomMinute, 0, 0);
+
+      // If time already passed today, push to tomorrow
+      if (timestamp.getTime() <= Date.now()) {
+        timestamp.setDate(timestamp.getDate() + 1);
+      }
 
       // Ensure at least 30 minutes apart
       if (dropTimes.every(t => Math.abs(t - timestamp.getTime()) >= 30 * 60 * 1000)) {
@@ -528,7 +588,7 @@ client.once('ready', () => {
     });
   }
 
-  scheduleRandomDrops(); // ✅ Called only once, inside the first .once('ready')
+  scheduleRandomDrops();
 });
 
 client.login(TOKEN);
