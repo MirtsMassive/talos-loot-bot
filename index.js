@@ -102,8 +102,10 @@ function getColor(rarity) {
 
 const sharp = require('sharp'); // (not currently used, but kept)
 
-// ---- Image generation (robust) ----
-async function generateImageFromPrompt(prompt, fileName, rarity) {
+// ---- Image generation (edge-aligned, optional frame) ----
+async function generateImageFromPrompt(prompt, fileName, opts = {}) {
+  const { rarity = 'Common', includeFrame = false } = opts;
+
   try {
     const image = await openai.images.generate({
       model: 'dall-e-3',
@@ -116,34 +118,37 @@ async function generateImageFromPrompt(prompt, fileName, rarity) {
     const url = image.data[0].url;
     const res = await fetch(url);
     const buffer = await res.arrayBuffer();
-
     const baseImage = await loadImage(Buffer.from(buffer));
 
-    // rarity may be undefined if caller forgot; guard it
-    const rarityKey = (rarity || 'Common').toLowerCase();
-    const framePath = path.join('frames', `frame_${rarityKey}.png`);
+    // Use actual size from the generated image so the frame sits flush
+    const W = baseImage.width || 1024;
+    const H = baseImage.height || 1024;
 
-    // compose
-    const canvas = createCanvas(1024, 1024);
+    const canvas = createCanvas(W, H);
     const ctx = canvas.getContext('2d');
 
-    ctx.drawImage(baseImage, 0, 0, 1024, 1024);
+    // Draw base
+    ctx.drawImage(baseImage, 0, 0, W, H);
 
-    if (fs.existsSync(framePath)) {
-      const frameImage = await loadImage(framePath);
-      ctx.drawImage(frameImage, 0, 0, 1024, 1024);
-    } else {
-      console.warn(`❗ Frame not found for rarity: ${rarityKey} (looked for ${framePath})`);
+    // Optional frame overlay (items only)
+    if (includeFrame) {
+      const rarityKey = String(rarity || 'Common').toLowerCase();
+      const framePath = path.join('frames', `frame_${rarityKey}.png`);
+      if (fs.existsSync(framePath)) {
+        const frameImage = await loadImage(framePath);
+        // Scale the frame to exactly cover the base image
+        ctx.drawImage(frameImage, 0, 0, W, H);
+      } else {
+        console.warn(`❗ Frame not found for rarity: ${rarityKey}`);
+      }
     }
 
     const finalBuffer = canvas.toBuffer('image/png');
     const finalPath = path.join(TEMP_DIR, fileName);
     fs.writeFileSync(finalPath, finalBuffer);
-
     return finalPath;
   } catch (err) {
     console.error('❌ Error generating image:', err);
-    // still write a placeholder to avoid crashes later
     const fallbackPath = path.join(TEMP_DIR, fileName);
     fs.writeFileSync(fallbackPath, Buffer.from(''));
     return fallbackPath;
@@ -170,10 +175,14 @@ async function dropChest(guildId, manual = false) {
     const id = Date.now().toString();
 
     const chestPrompt = `A fantasy loot chest of ${rarity} rarity. ${desc}`;
-    // ✅ pass rarity so frame overlay works; avoids undefined errors
-    const imagePath = await generateImageFromPrompt(chestPrompt, `${id}_chest.png`, rarity);
+    // Chest image: NO frame
+    const imagePath = await generateImageFromPrompt(
+      chestPrompt,
+      `${id}_chest.png`,
+      { rarity, includeFrame: false }
+    );
 
-    // ✅ define chest before any usage
+    // define chest before any usage
     const chest = {
       id,
       rarity,
@@ -327,7 +336,12 @@ Description: ...`
         const shortDesc = (description || '').split(': ')[1] || 'Mysterious artifact from distant storms.';
         const imagePrompt = `${shortDesc}. Fantasy item. No text, no characters in image.`;
 
-        const imagePath = await generateImageFromPrompt(imagePrompt, `${chest.id}_item${idx + 1}.png`, rarity);
+        // Item images: WITH frame
+        const imagePath = await generateImageFromPrompt(
+          imagePrompt,
+          `${chest.id}_item${idx + 1}.png`,
+          { rarity, includeFrame: true }
+        );
 
         return {
           idx: idx + 1,
@@ -453,12 +467,11 @@ Description: ...`
     msg.reply(`♻️ Scrapped ${item.emoji} **"${item.name}"** for **${value}** points!`);
   }
 
-  // ⭐ SCRAPALL command
+  // ⭐ SCRAPALL command (clean breakdown)
   if (command === '!scrapall') {
     const userInv = inventories[userId] || [];
     if (!userInv.length) return msg.reply("📦 Your inventory is already empty.");
 
-    // Tally points and counts by rarity
     let totalPoints = 0;
     const counts = {}; // { rarity: count }
     for (const item of userInv) {
@@ -469,18 +482,19 @@ Description: ...`
 
     // Award points and clear inventory
     points[userId] = (points[userId] || 0) + totalPoints;
+    const totalItems = userInv.length;
     inventories[userId] = [];
     saveAll();
 
-    // Make a readable breakdown
-    const breakdown = Object.entries(counts)
-      .sort((a, b) => (b[1] - a[1])) // most frequent first
-      .map(([rarity, count]) => `${getColor(rarity)} ${rarity} × ${count}`)
-      .join(', ');
+    // Multi-line breakdown, most-scrapped first
+    const lines = Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .map(([rarity, qty]) => `${getColor(rarity)} ${rarity} - ${qty}`)
+      .join('\n');
 
     msg.reply(
-      `♻️ Scrapped **${userInv.length}** item(s) for **${totalPoints}** points!\n` +
-      (breakdown ? `**Breakdown:** ${breakdown}` : '')
+      `♻️ Scrapped **${totalItems}** item(s) for **${totalPoints}** points!\n\n` +
+      `Scrapped:\n${lines}`
     );
   }
 
