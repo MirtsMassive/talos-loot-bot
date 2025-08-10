@@ -35,7 +35,7 @@ const rarityColors = {
   Rare: '🔵',
   Epic: '🟣',
   Legendary: '🟡',
-  Mythic: '⚔',
+  Mythic: '⚫',
   Artifact: '👁‍🗨'
 };
 
@@ -144,8 +144,8 @@ function buildFantasyItemImagePrompt(name, shortDesc, rarity) {
   const rarityStyle = getRarityItemStyle(rarity);
 
   return [
-    `High-fantasy game item icon — ${rarity.toLowerCase()} rarity: "${cleanName}". ${cleanDesc}.`,
-    `Style: ${rarityStyle}, hand-painted illustration, single centered subject on a neutral gradient backdrop,`,
+    `High-fantasy item — ${rarity.toLowerCase()} rarity: "${cleanName}". ${cleanDesc}.`,
+    `Style: ${rarityStyle}, realistic, single centered subject,`,
     `subtle volumetric light, intricate magical detail.`,
     `ABSOLUTE RULES: focus on the item only; no extra objects.`,
     `Do NOT depict any chest, box, crate, packaging, container, table, or scene.`,
