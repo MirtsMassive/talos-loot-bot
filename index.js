@@ -35,7 +35,7 @@ const rarityColors = {
   Rare: '🔵',
   Epic: '🟣',
   Legendary: '🟡',
-  Mythic: '⚫',
+  Mythic: '⚔',
   Artifact: '👁‍🗨'
 };
 
@@ -71,7 +71,6 @@ function saveAll() {
   fs.writeFileSync('inventory.json', JSON.stringify(inventories, null, 2));
   fs.writeFileSync('community.json', JSON.stringify(communityInventory, null, 2));
   fs.writeFileSync('points.json', JSON.stringify(points, null, 2));
-  // keep last 200 descriptions
   fs.writeFileSync('desc_history.json', JSON.stringify(descHistory.slice(-200), null, 2));
 }
 
@@ -109,63 +108,34 @@ function getColor(rarity) {
   return rarityColors[rarity] || '⬜';
 }
 
-// ====================== RARITY STYLING HELPERS ======================
-function getRarityChestStyle(rarity) {
-  switch (rarity.toLowerCase()) {
-    case 'common':    return "sturdy wooden chest, iron bands, modest fantasy design, soft torchlight";
-    case 'uncommon':  return "oak chest with faint runes, gentle magical glow, tasteful ornamentation";
-    case 'rare':      return "ornate chest, luminous runes, polished gold trim, rich leather and metalwork";
-    case 'epic':      return "majestic chest with swirling magical aura, gemstone inlays, intricate filigree, dramatic lighting";
-    case 'legendary': return "magnificent chest radiating ancient power, rare jewels, halo of light from within, master craftsmanship";
-    case 'mythic':    return "otherworldly chest humming with primal magic, celestial inlays, wisps of arcane energy, unreal detail";
-    case 'artifact':  return "divine chest forged by gods, wreathed in cosmic light and living magic, awe-inspiring craftsmanship";
-    default:          return "fantasy treasure chest";
-  }
-}
-
-// Item style must NEVER describe a chest/container.
-function getRarityItemStyle(rarity) {
-  switch (rarity.toLowerCase()) {
-    case 'common':    return "simple enchanted trinket, subtle glow, humble materials";
-    case 'uncommon':  return "refined mystical charm, etched motifs, faint aura";
-    case 'rare':      return "ornate relic, glowing runes, polished metals and crystal accents";
-    case 'epic':      return "grand arcane artifact, gemstones, radiant aura, intricate filigree";
-    case 'legendary': return "mythic relic radiating ancient power, masterwork detail, haloed light";
-    case 'mythic':    return "otherworldly artifact woven with primal magic, celestial gleam, exquisite craftsmanship";
-    case 'artifact':  return "god-forged relic of unimaginable power, cosmic radiance, sacred artistry";
-    default:          return "fantasy magical item";
-  }
-}
-
-// ====================== IMAGE PROMPT BUILDERS ======================
-function buildFantasyItemImagePrompt(name, shortDesc, rarity) {
-  const cleanName = (name || '').replace(/[\"<>]/g, '');
-  const cleanDesc = (shortDesc || '').replace(/[\"<>]/g, '');
-  const rarityStyle = getRarityItemStyle(rarity);
-
-  return [
-    `High-fantasy item — ${rarity.toLowerCase()} rarity: "${cleanName}". ${cleanDesc}.`,
-    `Style: ${rarityStyle}, realistic, single centered subject,`,
-    `subtle volumetric light, intricate magical detail.`,
-    `ABSOLUTE RULES: focus on the item only; no extra objects.`,
-    `Do NOT depict any chest, box, crate, packaging, container, table, or scene.`,
-    `No people, no hands, no characters.`,
-    `No words, letters, labels, UI, logos, watermarks, text.`,
-    `No modern or sci-fi objects. Square composition.`
-  ].join(' ');
-}
-
+// ====================== RARITY STYLING HELPERS (IMAGES ONLY) ======================
+// We keep these minimal; no fixed phrase banks for text descriptions.
 function buildChestImagePrompt(rarity) {
-  const style = getRarityChestStyle(rarity);
   return [
-    `${style}. Single chest centered. Cinematic lighting.`,
-    `Ultra high detail, mystical fantasy illustration.`,
-    `ABSOLUTE RULES: no words, letters, labels, UI, logos, watermarks.`,
+    `A single closed fantasy treasure chest. Grandeur and craftsmanship should reflect ${rarity} rarity (more elaborate for higher rarities).`,
+    `Exterior only. Closed lid. No interior or contents.`,
+    `Centered, dramatic lighting, high detail, mystical/fantasy style.`,
+    `ABSOLUTE RULES: no words, no letters in any language, no labels, no logos, no UI, no watermarks.`,
     `Square composition.`
   ].join(' ');
 }
 
-// ====================== IMAGE GENERATION ======================
+function buildFantasyItemImagePrompt(name, shortDesc, rarity) {
+  const cleanName = (name || '').replace(/[\"<>]/g, '');
+  const cleanDesc = (shortDesc || '').replace(/[\"<>]/g, '');
+
+  return [
+    `High-fantasy magical item icon of "${cleanName}" (${rarity} rarity). ${cleanDesc}.`,
+    `Single object only, centered on a clean neutral gradient background.`,
+    `Mystical aura, intricate detail, realistic materials.`,
+    `ABSOLUTE RULES: do not show any text, title, letters, runes, glyphs, numbers, UI, blueprints, poster design, diagrams, borders, labels, logos, watermarks, captions, or annotations.`,
+    `Do not depict any chest, box, crate, packaging, table, scroll page, or scene; focus only on the item.`,
+    `No people or hands. No modern or sci-fi objects.`,
+    `Square composition.`
+  ].join(' ');
+}
+
+// ====================== IMAGE GENERATION (with light edge-crop to remove captions) ======================
 async function generateImageFromPrompt(prompt, fileName) {
   try {
     const image = await openai.images.generate({
@@ -186,7 +156,14 @@ async function generateImageFromPrompt(prompt, fileName) {
     const canvas = createCanvas(W, H);
     const ctx = canvas.getContext('2d');
 
-    ctx.drawImage(baseImage, 0, 0, W, H);
+    // Light uniform crop (6%) to shave off any stray titles/borders DALL·E may add
+    const CROP = 0.06;
+    const sx = Math.floor(W * CROP);
+    const sy = Math.floor(H * CROP);
+    const sw = Math.floor(W * (1 - CROP * 2));
+    const sh = Math.floor(H * (1 - CROP * 2));
+
+    ctx.drawImage(baseImage, sx, sy, sw, sh, 0, 0, W, H);
 
     const finalBuffer = canvas.toBuffer('image/png');
     const finalPath = path.join(TEMP_DIR, fileName);
@@ -208,7 +185,6 @@ function normalizeForSim(s) {
     .split(/\s+/)
     .filter(w => w.length > 3);
 }
-
 function jaccardSim(a, b) {
   const A = new Set(normalizeForSim(a));
   const B = new Set(normalizeForSim(b));
@@ -218,31 +194,19 @@ function jaccardSim(a, b) {
   return inter / (A.size + B.size - inter);
 }
 
-// ====================== TEXT: RARITY-SCALED CHEST DESCRIPTION (≤60 words, exterior-only, unique) ======================
+// ====================== TEXT: UNIQUE CHEST DESCRIPTION (≤60 words, exterior-only) ======================
 async function generateChestDescription(rarity) {
-  const toneByRarity = {
-    common:    "plain, sturdy, practical; modest imagery and grounded diction",
-    uncommon:  "subtly magical; tasteful ornament; a hint of wonder",
-    rare:      "ornate and luminous; refined imagery; confident, evocative tone",
-    epic:      "grand, radiant, richly textured; sweeping, awe-leaning diction",
-    legendary: "majestic, ancient power; jeweled, radiant; potent and memorable turns of phrase",
-    mythic:    "otherworldly, primal magic; celestial metaphors; myth-forged gravitas",
-    artifact:  "divine, god-wrought; cosmic imagery; language of destiny and reverence"
-  };
-  const tone = toneByRarity[rarity.toLowerCase()] || "fantastical yet concise";
-
   const rules = `
-Rules:
-- 45–60 words.
-- Describe EXTERIOR ONLY. Do NOT mention opening, lids, the inside/interior, contents, or what it holds.
+Write a single-paragraph fantasy description of a CLOSED treasure chest.
+Constraints:
+- 45–60 words (concise but vivid).
+- Describe EXTERIOR ONLY. Do NOT mention opening, lids moving, the interior/inside, contents, or what it holds.
 - No future actions or instructions.
-- Vary syntax and imagery; avoid repeated phrasing and clichés.
-- Include one vivid sensory detail about surface, aura, or surroundings (not interior).
+- Language and sense of grandeur should scale naturally with rarity: ${rarity}.
+- Vary syntax and imagery; avoid clichés and repeated phrasing.
 Return ONLY the description text.`;
 
-  const prompt = `Write a single-paragraph fantasy chest description for a ${rarity} chest.
-Style guidance by rarity: ${tone}
-${rules}`.trim();
+  const prompt = rules.trim();
 
   const MAX_TRIES = 4;
   const SIM_THRESHOLD = 0.58;
@@ -253,18 +217,16 @@ ${rules}`.trim();
       model: 'gpt-4o',
       messages: [{ role: 'user', content: prompt }],
       max_tokens: 180,
-      temperature: 0.9,
-      presence_penalty: 0.6,
-      frequency_penalty: 0.4
+      temperature: 0.95,
+      presence_penalty: 0.7,
+      frequency_penalty: 0.45
     });
 
     let text = (resp.choices?.[0]?.message?.content || '').trim();
 
     // enforce 60-word cap
     const words = text.split(/\s+/);
-    if (words.length > 60) {
-      text = words.slice(0, 60).join(' ').replace(/[.,;:!?-]*$/, '.') ;
-    }
+    if (words.length > 60) text = words.slice(0, 60).join(' ').replace(/[.,;:!?-]*$/, '.');
 
     // block interior/opening mentions
     const banned = /\b(open|opened|opening|inside|interior|within|contents?|reveals?|revealing|contains?)\b/i;
@@ -278,8 +240,8 @@ ${rules}`.trim();
     }
   }
 
-  // Fallback (should rarely trigger)
-  const fallbackText = `${rarity} chest stands weathered yet distinct, its exterior marked by craft and a faint aura of promise.`;
+  // Fallback (rare)
+  const fallbackText = `A closed ${rarity.toLowerCase()} chest rests in the light, exterior gleaming with careful craft and a quiet aura of promise.`;
   descHistory.push({ rarity, text: fallbackText, ts: Date.now() });
   saveAll();
   return fallbackText;
@@ -294,10 +256,7 @@ async function dropChest(guildId, manual = false) {
     const id = Date.now().toString();
 
     const chestPrompt = buildChestImagePrompt(rarity);
-    const imagePath = await generateImageFromPrompt(
-      chestPrompt,
-      `${id}_chest.png`
-    );
+    const imagePath = await generateImageFromPrompt(chestPrompt, `${id}_chest.png`);
 
     const chest = {
       id,
@@ -362,22 +321,14 @@ client.on('messageCreate', async (msg) => {
     saveAll();
 
     msg.reply('🧿 A chest has been summoned using your keys!');
-    console.log(`!usedrop triggered by ${msg.author.username}`);
-
     await dropChest(guildId, true);
-    console.log(`dropChest completed for ${msg.author.username}`);
   }
 
   if (command === '!drop') {
-    console.log(`!drop command received from ${msg.author.username}`);
-
-    const hasRoleAccess = msg.member.roles.cache.some(role =>
-      ALLOWED_ROLE_IDS.includes(role.id)
-    );
+    const hasRoleAccess = msg.member.roles.cache.some(role => ALLOWED_ROLE_IDS.includes(role.id));
     if (!hasRoleAccess) {
       return msg.reply('❌ You need a specific role to use this command.');
     }
-
     await dropChest(guildId, true);
   }
 
@@ -460,11 +411,7 @@ Description: ...`
         const shortDesc = (description || '').split(': ')[1] || 'Ancient relic infused with quiet power.';
         const imagePrompt = buildFantasyItemImagePrompt(name, shortDesc, rarity);
 
-        // Item images: NO frames (per request)
-        const imagePath = await generateImageFromPrompt(
-          imagePrompt,
-          `${chest.id}_item${idx + 1}.png`
-        );
+        const imagePath = await generateImageFromPrompt(imagePrompt, `${chest.id}_item${idx + 1}.png`);
 
         return {
           idx: idx + 1,
@@ -478,7 +425,7 @@ Description: ...`
       }));
 
       chest.items = items;
-      chest.claimedBy = []; // initialize as list for claim tracking
+      chest.claimedBy = [];
       keys.set(userId, userKeys - 1);
 
       const formatted = items.map(i =>
@@ -499,7 +446,6 @@ Description: ...`
     const number = parseInt(args[0], 10);
     if (isNaN(number)) return msg.reply('Usage: `!claim <itemNumber>`');
 
-    // Find the most recent unclaimed chest with items for this user context
     const chest = [...chests]
       .reverse()
       .find(c => c.guildId === guildId && c.items?.length && !inventories[userId]?.some(i => i.sourceChest === c.id));
@@ -596,7 +542,7 @@ Description: ...`
     if (!userInv.length) return msg.reply("📦 Your inventory is already empty.");
 
     let totalPoints = 0;
-    const counts = {}; // { rarity: count }
+    const counts = {};
     for (const item of userInv) {
       const val = getScrapValue(item.rarity);
       totalPoints += val;
