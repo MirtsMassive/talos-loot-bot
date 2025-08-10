@@ -108,39 +108,113 @@ function getColor(rarity) {
   return rarityColors[rarity] || '⬜';
 }
 
-// ====================== RARITY STYLING HELPERS (IMAGES ONLY) ======================
-// We keep these minimal; no fixed phrase banks for text descriptions.
-function buildChestImagePrompt(rarity) {
+/* ──────────────────────────────────────────────────────────────────────────
+   Safety sanitizer to avoid DALL·E policy trips + risky word replacements
+   ────────────────────────────────────────────────────────────────────────── */
+const RISKY_TERMS = [
+  'gun','pistol','rifle','bullet','shotgun','sniper','grenade','mine','tank','bomb',
+  'blood','gore','guts','severed','decapitated','corpse','kill','murder',
+  'nude','naked','lingerie','seductive','erotic','sexual',
+  'drug','cocaine','heroin','marijuana','alcohol','vodka',
+  'nazi','hitler','isis','terrorist','politics','political',
+  'logo','brand','trademark'
+];
+const SAFE_REPLACEMENTS = {
+  gun: 'arcane wand',
+  pistol: 'arcane wand',
+  rifle: 'enchanted longbow',
+  bullet: 'spark of magic',
+  shotgun: 'stormcaster',
+  sniper: 'farseeing bow',
+  grenade: 'aether orb',
+  mine: 'trap rune',
+  tank: 'golem',
+  bomb: 'volatile glyph',
+  blood: 'ether',
+  gore: 'shadow',
+  guts: 'ether',
+  severed: 'broken',
+  decapitated: 'shattered',
+  corpse: 'statue',
+  kill: 'banish',
+  murder: 'banish',
+  nude: 'ancient',
+  naked: 'ancient',
+  lingerie: 'silken',
+  seductive: 'alluring',
+  erotic: 'mystical',
+  sexual: 'mystical',
+  drug: 'potion',
+  cocaine: 'powder',
+  heroin: 'elixir',
+  marijuana: 'herb',
+  alcohol: 'elixir',
+  vodka: 'elixir',
+  nazi: 'ancient',
+  hitler: 'ancient',
+  isis: 'ancient',
+  terrorist: 'raider',
+  politics: 'affairs',
+  political: 'public',
+  logo: 'mark',
+  brand: 'mark',
+  trademark: 'mark'
+};
+
+function sanitizeForImage(text) {
+  let t = (text || '').replace(/[\"<>]/g, '');
+  // Lower-case replace by word boundary
+  for (const k of RISKY_TERMS) {
+    const re = new RegExp(`\\b${k}\\b`, 'gi');
+    t = t.replace(re, SAFE_REPLACEMENTS[k] || '');
+  }
+  // Remove any mention suggesting readable text
+  t = t.replace(/\b(text|title|label|caption|typography|words?)\b/gi, '');
+  return t.replace(/\s{2,}/g, ' ').trim();
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   IMAGE PROMPT BUILDERS
+   ────────────────────────────────────────────────────────────────────────── */
+
+// Chest image prompt: USE the exact generated description (sanitized) so image matches text
+function buildChestImagePromptFromDesc(desc, rarity) {
+  const clean = sanitizeForImage(desc || '');
   return [
-    `A single closed fantasy treasure chest. Grandeur and craftsmanship should reflect ${rarity} rarity (more elaborate for higher rarities).`,
+    `Closed fantasy treasure chest matching this description: ${clean}`,
+    `Grandeur and craftsmanship should naturally reflect ${rarity} rarity (more elaborate for higher rarities).`,
     `Exterior only. Closed lid. No interior or contents.`,
-    `Centered, dramatic lighting, high detail, mystical/fantasy style.`,
-    `ABSOLUTE RULES: no words, no letters in any language, no labels, no logos, no UI, no watermarks.`,
+    `Hand-painted high-fantasy illustration / stylized 3D render, dramatic lighting, centered, high detail.`,
+    `ABSOLUTE RULES: no readable text; no letters or numbers; no labels, logos, UI, blueprints, diagrams, posters, or watermarks.`,
+    `If runes appear, they must be abstract and not form legible writing.`,
     `Square composition.`
   ].join(' ');
 }
 
+// Item image prompt with strong safety language
 function buildFantasyItemImagePrompt(name, shortDesc, rarity) {
-  const cleanName = (name || '').replace(/[\"<>]/g, '');
-  const cleanDesc = (shortDesc || '').replace(/[\"<>]/g, '');
+  const cleanName = sanitizeForImage(name || '');
+  const cleanDesc = sanitizeForImage(shortDesc || '');
 
   return [
     `High-fantasy magical item icon of "${cleanName}" (${rarity} rarity). ${cleanDesc}.`,
     `Single object only, centered on a clean neutral gradient background.`,
-    `Mystical aura, intricate detail, realistic materials.`,
-    `ABSOLUTE RULES: do not show any text, title, letters, runes, glyphs, numbers, UI, blueprints, poster design, diagrams, borders, labels, logos, watermarks, captions, or annotations.`,
+    `Hand-painted illustration style; stylized fantasy depiction; non-functional portrayal.`,
+    `No modern objects or real-world weapons; no gore; no adult themes; no politics or real religions.`,
+    `ABSOLUTE RULES: no text, letters, numbers, runes, labels, logos, UI, blueprints, diagrams, posters, annotations, or watermarks.`,
     `Do not depict any chest, box, crate, packaging, table, scroll page, or scene; focus only on the item.`,
-    `No people or hands. No modern or sci-fi objects.`,
-    `Square composition.`
+    `No people or hands. Square composition.`
   ].join(' ');
 }
 
-// ====================== IMAGE GENERATION (with light edge-crop to remove captions) ======================
+/* ──────────────────────────────────────────────────────────────────────────
+   IMAGE GENERATION (with safe retry + edge-crop to remove stray captions)
+   ────────────────────────────────────────────────────────────────────────── */
 async function generateImageFromPrompt(prompt, fileName) {
-  try {
+  const tryOnce = async (p) => {
     const image = await openai.images.generate({
       model: 'dall-e-3',
-      prompt,
+      prompt: p,
       n: 1,
       size: '1024x1024',
       response_format: 'url'
@@ -169,15 +243,36 @@ async function generateImageFromPrompt(prompt, fileName) {
     const finalPath = path.join(TEMP_DIR, fileName);
     fs.writeFileSync(finalPath, finalBuffer);
     return finalPath;
+  };
+
+  try {
+    return await tryOnce(prompt);
   } catch (err) {
-    console.error('❌ Error generating image:', err);
+    const isPolicy = (err?.status === 400) || /safety|policy|content/i.test(String(err?.message || ''));
+    if (isPolicy) {
+      const safer = [
+        sanitizeForImage(prompt),
+        'Stylized high-fantasy illustration of a single object.',
+        'No text, no letters, no numbers, no logos, UI, people, gore, adult themes, politics, or real religions.',
+        'Neutral gradient background, centered composition.'
+      ].join(' ');
+      try {
+        return await tryOnce(safer);
+      } catch (e2) {
+        console.error('Policy-safe retry failed:', e2);
+      }
+    } else {
+      console.error('Image generation failed:', err);
+    }
     const fallbackPath = path.join(TEMP_DIR, fileName);
     fs.writeFileSync(fallbackPath, Buffer.from(''));
     return fallbackPath;
   }
 }
 
-// ====================== DESCRIPTION UNIQUENESS HELPERS ======================
+/* ──────────────────────────────────────────────────────────────────────────
+   DESCRIPTION UNIQUENESS HELPERS
+   ────────────────────────────────────────────────────────────────────────── */
 function normalizeForSim(s) {
   return (s || '')
     .toLowerCase()
@@ -194,7 +289,9 @@ function jaccardSim(a, b) {
   return inter / (A.size + B.size - inter);
 }
 
-// ====================== TEXT: UNIQUE CHEST DESCRIPTION (≤60 words, exterior-only) ======================
+/* ──────────────────────────────────────────────────────────────────────────
+   TEXT: UNIQUE CHEST DESCRIPTION (≤60 words, exterior-only)
+   ────────────────────────────────────────────────────────────────────────── */
 async function generateChestDescription(rarity) {
   const rules = `
 Write a single-paragraph fantasy description of a CLOSED treasure chest.
@@ -247,7 +344,9 @@ Return ONLY the description text.`;
   return fallbackText;
 }
 
-// ====================== DROP CHEST ======================
+/* ──────────────────────────────────────────────────────────────────────────
+   DROP CHEST
+   ────────────────────────────────────────────────────────────────────────── */
 async function dropChest(guildId, manual = false) {
   try {
     const rarity = rollRarity();
@@ -255,7 +354,8 @@ async function dropChest(guildId, manual = false) {
     const desc = await generateChestDescription(rarity);
     const id = Date.now().toString();
 
-    const chestPrompt = buildChestImagePrompt(rarity);
+    // 🧲 Use the description itself to create the image prompt (so they match)
+    const chestPrompt = buildChestImagePromptFromDesc(desc, rarity);
     const imagePath = await generateImageFromPrompt(chestPrompt, `${id}_chest.png`);
 
     const chest = {
@@ -302,6 +402,9 @@ Use \`!open ${id}\` to open it (costs 1 key).`,
   }
 }
 
+/* ──────────────────────────────────────────────────────────────────────────
+   COMMANDS
+   ────────────────────────────────────────────────────────────────────────── */
 client.on('messageCreate', async (msg) => {
   if (!msg.guild || msg.author.bot) return;
 
@@ -383,6 +486,7 @@ client.on('messageCreate', async (msg) => {
 HARD RULES:
 - Only fantasy/mystical artifacts, weapons, armor, trinkets, tomes, crystals, etc.
 - No modern objects, no brands, no product photography, no sci-fi guns.
+- Avoid words that imply gore, blood, torture, drugs, adult/sexual content, real-world politics or religions, or modern brands/logos.
 - Keep language medieval/magical.
 
 For each item provide:
