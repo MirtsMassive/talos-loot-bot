@@ -102,14 +102,79 @@ function getColor(rarity) {
 
 const sharp = require('sharp'); // (not currently used, but kept)
 
-// ---- Image generation (edge-aligned, optional frame) ----
+// ---------- FRAME HELPERS (trim transparent padding, draw tight) ----------
+async function drawFrameTight(ctx, framePath, W, H) {
+  if (!fs.existsSync(framePath)) {
+    console.warn(`❗ Frame not found: ${framePath}`);
+    return;
+  }
+  const frameImg = await loadImage(framePath);
+
+  // Draw frame into a temp canvas to inspect alpha and compute content bounds
+  const tCanvas = createCanvas(frameImg.width, frameImg.height);
+  const tCtx = tCanvas.getContext('2d');
+  tCtx.drawImage(frameImg, 0, 0);
+  const { data, width, height } = tCtx.getImageData(0, 0, frameImg.width, frameImg.height);
+
+  const alphaThreshold = 10; // >0 = visible
+  let minX = width, minY = height, maxX = -1, maxY = -1;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = (y * width + x) * 4;
+      const a = data[idx + 3];
+      if (a > alphaThreshold) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+
+  if (maxX < 0 || maxY < 0) {
+    console.warn(`❗ Frame has no visible pixels: ${framePath}`);
+    return;
+  }
+
+  const srcX = minX;
+  const srcY = minY;
+  const srcW = (maxX - minX + 1);
+  const srcH = (maxY - minY + 1);
+
+  // Draw the trimmed frame to exactly cover the base image
+  ctx.drawImage(frameImg, srcX, srcY, srcW, srcH, 0, 0, W, H);
+}
+
+// ---- Build a safe, fantasy-only image prompt ----
+function buildFantasyItemImagePrompt(name, shortDesc, rarity) {
+  const cleanName = (name || '').replace(/[\"<>]/g, '');
+  const cleanDesc = (shortDesc || '').replace(/[\"<>]/g, '');
+
+  return [
+    `High-fantasy game item icon, ${rarity} rarity: "${cleanName}".`,
+    `Description: ${cleanDesc}.`,
+    `Style: hand-painted illustration, mystical, magical artifact, medieval fantasy aesthetic,`,
+    `single centered subject on a neutral dark backdrop, subtle volumetric light,`,
+    `no characters, no hands, no bodies.`,
+    `Do NOT include any words, text, labels, logos, brands, UI, watermarks,`,
+    `typography, captions, or product photography.`,
+    `Not modern, not contemporary, not commercial, not an advertisement.`,
+    `Square composition.`,
+  ].join(' ');
+}
+
 async function generateImageFromPrompt(prompt, fileName, opts = {}) {
   const { rarity = 'Common', includeFrame = false } = opts;
 
   try {
+    const fantasyPrompt = `Fantasy, mystical, detailed, high quality, 3D render. ${prompt}.
+    No text, no letters, no labels, no watermark, no UI, no diagrams, no charts, no logos. 
+    Render as a magical fantasy item, realistic lighting, intricate details.`;
+
     const image = await openai.images.generate({
       model: 'dall-e-3',
-      prompt: `${prompt} No text or labels in the image.`,
+      prompt: fantasyPrompt,
       n: 1,
       size: '1024x1024',
       response_format: 'url'
@@ -120,26 +185,24 @@ async function generateImageFromPrompt(prompt, fileName, opts = {}) {
     const buffer = await res.arrayBuffer();
     const baseImage = await loadImage(Buffer.from(buffer));
 
-    // Use actual size from the generated image so the frame sits flush
-    const W = baseImage.width || 1024;
-    const H = baseImage.height || 1024;
-
+    // Force 1024x1024 canvas to match frame asset size
+    const W = 1024;
+    const H = 1024;
     const canvas = createCanvas(W, H);
     const ctx = canvas.getContext('2d');
 
-    // Draw base
+    // Draw main image
     ctx.drawImage(baseImage, 0, 0, W, H);
 
-    // Optional frame overlay (items only)
+    // Only add frame for items
     if (includeFrame) {
-      const rarityKey = String(rarity || 'Common').toLowerCase();
+      const rarityKey = rarity.toLowerCase();
       const framePath = path.join('frames', `frame_${rarityKey}.png`);
       if (fs.existsSync(framePath)) {
         const frameImage = await loadImage(framePath);
-        // Scale the frame to exactly cover the base image
         ctx.drawImage(frameImage, 0, 0, W, H);
       } else {
-        console.warn(`❗ Frame not found for rarity: ${rarityKey}`);
+        console.warn(`Frame not found for rarity: ${rarityKey}`);
       }
     }
 
@@ -156,12 +219,12 @@ async function generateImageFromPrompt(prompt, fileName, opts = {}) {
 }
 
 async function generateChestDescription(rarity) {
-  const prompt = `Write a fantasy-style loot chest description for a ${rarity.toLowerCase()} rarity chest. Do not describe specific items. Make it vivid and atmospheric. Keep under 100 words.`;
+  const prompt = `Write a fantasy-style loot chest description for a ${rarity.toLowerCase()} rarity chest. Do not describe specific items. Make it vivid and atmospheric. Keep under 80 words.`;
   const response = await openai.chat.completions.create({
     model: 'gpt-4o',
     messages: [{ role: 'user', content: prompt }],
     max_tokens: 150,
-    temperature: 0.85
+    temperature: 0.8
   });
   return response.choices[0].message.content.trim();
 }
@@ -174,7 +237,13 @@ async function dropChest(guildId, manual = false) {
     const desc = await generateChestDescription(rarity);
     const id = Date.now().toString();
 
-    const chestPrompt = `A fantasy loot chest of ${rarity} rarity. ${desc}`;
+    const chestPrompt = [
+      `A fantasy treasure chest of ${rarity} rarity,`,
+      `cinematic lighting, ornate metal bands, mossy stones, enchanted atmosphere.`,
+      `High-fantasy illustration, single chest centered, square composition.`,
+      `Do NOT include any words, labels, UI, logos, or watermarks.`
+    ].join(' ');
+
     // Chest image: NO frame
     const imagePath = await generateImageFromPrompt(
       chestPrompt,
@@ -310,16 +379,23 @@ client.on('messageCreate', async (msg) => {
         model: 'gpt-4o',
         messages: [{
           role: 'user',
-          content: `Create 2 unique fantasy loot items for a ${chest.rarity} chest. Each should include:
-- Name (1-4 words)
-- Description (max 35 words)
+          content:
+`Create 2 unique **high-fantasy, medieval** loot items for a ${chest.rarity} chest.
+HARD RULES:
+- Only fantasy/mystical artifacts, weapons, armor, trinkets, tomes, crystals, etc.
+- No modern objects, no brands, no product photography, no sci-fi guns.
+- Keep language medieval/magical.
+
+For each item provide:
+- Name (1–4 words)
+- Description (max 35 words, fantasy tone)
 - Score: number between 10000–99999
 
-Format:
+Format exactly:
 1. "Item Name" (Rarity: X | Score: XXXXX)
 Description: ...`
         }],
-        temperature: 0.9,
+        temperature: 0.85,
         max_tokens: 600
       });
 
@@ -333,8 +409,8 @@ Description: ...`
         const rarity = match?.[2] || chest.rarity;
         const score = parseInt(match?.[3] || `${getRarityScore(rarity)}`, 10);
 
-        const shortDesc = (description || '').split(': ')[1] || 'Mysterious artifact from distant storms.';
-        const imagePrompt = `${shortDesc}. Fantasy item. No text, no characters in image.`;
+        const shortDesc = (description || '').split(': ')[1] || 'Ancient relic infused with quiet power.';
+        const imagePrompt = buildFantasyItemImagePrompt(name, shortDesc, rarity);
 
         // Item images: WITH frame
         const imagePath = await generateImageFromPrompt(
