@@ -102,31 +102,55 @@ function getColor(rarity) {
 
 const sharp = require('sharp'); // (not currently used, but kept)
 
-// ---------- FRAME HELPERS (trim transparent padding, draw tight) ----------
-async function drawFrameTight(ctx, framePath, W, H) {
+// ====================== RARITY STYLING HELPERS ======================
+function getRarityVisualStyle(rarity) {
+  switch (rarity.toLowerCase()) {
+    case 'common':    return "sturdy wooden chest, iron bands, modest fantasy design, soft torchlight";
+    case 'uncommon':  return "oak chest with faint runes, gentle magical glow, tasteful ornamentation";
+    case 'rare':      return "ornate chest, luminous runes, polished gold trim, rich leather & metalwork";
+    case 'epic':      return "majestic chest with swirling magical aura, gemstone inlays, intricate filigree, dramatic lighting";
+    case 'legendary': return "magnificent chest radiating ancient power, rare jewels, halo of light from within, master craftsmanship";
+    case 'mythic':    return "otherworldly chest humming with primal magic, celestial inlays, wisps of arcane energy, unreal detail";
+    case 'artifact':  return "mythic divine chest forged by gods, wreathed in cosmic light and living magic, awe-inspiring craftsmanship";
+    default:          return "fantasy treasure chest";
+  }
+}
+
+function getRarityDescriptor(rarity) {
+  switch (rarity.toLowerCase()) {
+    case 'common':    return "simple, sturdy, practical";
+    case 'uncommon':  return "engraved with faint runes and modest detailing";
+    case 'rare':      return "ornate, etched with glowing sigils, masterfully crafted";
+    case 'epic':      return "grand, humming with enchantment, filigreed and resplendent";
+    case 'legendary': return "magnificent, ancient power coiled within, jeweled and radiant";
+    case 'mythic':    return "otherworldly, alive with primal magic, steeped in lore";
+    case 'artifact':  return "divine, god-forged, surrounded by cosmic light and living spellwork";
+    default:          return "sturdy and dependable";
+  }
+}
+
+// ====================== FRAME: CROP TRANSPARENT PADDING ======================
+async function drawFrameFlush(ctx, framePath, W, H) {
   if (!fs.existsSync(framePath)) {
     console.warn(`❗ Frame not found: ${framePath}`);
     return;
   }
   const frameImg = await loadImage(framePath);
 
-  // Draw frame into a temp canvas to inspect alpha and compute content bounds
-  const tCanvas = createCanvas(frameImg.width, frameImg.height);
-  const tCtx = tCanvas.getContext('2d');
-  tCtx.drawImage(frameImg, 0, 0);
-  const { data, width, height } = tCtx.getImageData(0, 0, frameImg.width, frameImg.height);
+  // draw to temp to read alpha
+  const t = createCanvas(frameImg.width, frameImg.height);
+  const tctx = t.getContext('2d');
+  tctx.drawImage(frameImg, 0, 0);
+  const img = tctx.getImageData(0, 0, frameImg.width, frameImg.height);
 
-  const alphaThreshold = 10; // >0 = visible
-  let minX = width, minY = height, maxX = -1, maxY = -1;
-
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const idx = (y * width + x) * 4;
-      const a = data[idx + 3];
-      if (a > alphaThreshold) {
+  let minX = img.width, minY = img.height, maxX = -1, maxY = -1;
+  for (let y = 0; y < img.height; y++) {
+    for (let x = 0; x < img.width; x++) {
+      const a = img.data[(y * img.width + x) * 4 + 3];
+      if (a > 0) {
         if (x < minX) minX = x;
-        if (x > maxX) maxX = x;
         if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
         if (y > maxY) maxY = y;
       }
     }
@@ -137,44 +161,44 @@ async function drawFrameTight(ctx, framePath, W, H) {
     return;
   }
 
-  const srcX = minX;
-  const srcY = minY;
-  const srcW = (maxX - minX + 1);
-  const srcH = (maxY - minY + 1);
-
-  // Draw the trimmed frame to exactly cover the base image
-  ctx.drawImage(frameImg, srcX, srcY, srcW, srcH, 0, 0, W, H);
+  const srcW = maxX - minX + 1;
+  const srcH = maxY - minY + 1;
+  ctx.drawImage(frameImg, minX, minY, srcW, srcH, 0, 0, W, H);
 }
 
-// ---- Build a safe, fantasy-only image prompt ----
+// ====================== IMAGE PROMPT BUILDERS ======================
 function buildFantasyItemImagePrompt(name, shortDesc, rarity) {
   const cleanName = (name || '').replace(/[\"<>]/g, '');
   const cleanDesc = (shortDesc || '').replace(/[\"<>]/g, '');
+  const rarityStyle = getRarityVisualStyle(rarity);
 
   return [
-    `High-fantasy game item icon, ${rarity} rarity: "${cleanName}".`,
-    `Description: ${cleanDesc}.`,
-    `Style: hand-painted illustration, mystical, magical artifact, medieval fantasy aesthetic,`,
-    `single centered subject on a neutral dark backdrop, subtle volumetric light,`,
-    `no characters, no hands, no bodies.`,
-    `Do NOT include any words, text, labels, logos, brands, UI, watermarks,`,
-    `typography, captions, or product photography.`,
-    `Not modern, not contemporary, not commercial, not an advertisement.`,
-    `Square composition.`,
+    `High-fantasy game item icon, ${rarity.toLowerCase()} rarity: "${cleanName}". ${cleanDesc}.`,
+    `Style: ${rarityStyle}, hand-painted illustration, single centered subject on neutral dark backdrop,`,
+    `subtle volumetric light, intricate magical detail.`,
+    `ABSOLUTE RULES: no words, no letters, no labels, no UI, no watermark, no logos,`,
+    `no product photography, no modern objects, no people, no hands. Square composition.`
   ].join(' ');
 }
 
+function buildChestImagePrompt(rarity) {
+  const style = getRarityVisualStyle(rarity);
+  return [
+    `${style}. Single chest centered. Cinematic lighting.`,
+    `Ultra high detail, mystical fantasy illustration.`,
+    `ABSOLUTE RULES: no words, no letters, no labels, no UI, no watermark, no logos.`,
+    `Square composition.`
+  ].join(' ');
+}
+
+// ====================== IMAGE GENERATION (FRAMES ONLY FOR ITEMS) ======================
 async function generateImageFromPrompt(prompt, fileName, opts = {}) {
   const { rarity = 'Common', includeFrame = false } = opts;
 
   try {
-    const fantasyPrompt = `Fantasy, mystical, detailed, high quality, 3D render. ${prompt}.
-    No text, no letters, no labels, no watermark, no UI, no diagrams, no charts, no logos. 
-    Render as a magical fantasy item, realistic lighting, intricate details.`;
-
     const image = await openai.images.generate({
       model: 'dall-e-3',
-      prompt: fantasyPrompt,
+      prompt,
       n: 1,
       size: '1024x1024',
       response_format: 'url'
@@ -185,25 +209,17 @@ async function generateImageFromPrompt(prompt, fileName, opts = {}) {
     const buffer = await res.arrayBuffer();
     const baseImage = await loadImage(Buffer.from(buffer));
 
-    // Force 1024x1024 canvas to match frame asset size
     const W = 1024;
     const H = 1024;
     const canvas = createCanvas(W, H);
     const ctx = canvas.getContext('2d');
 
-    // Draw main image
     ctx.drawImage(baseImage, 0, 0, W, H);
 
-    // Only add frame for items
     if (includeFrame) {
-      const rarityKey = rarity.toLowerCase();
+      const rarityKey = String(rarity || 'Common').toLowerCase();
       const framePath = path.join('frames', `frame_${rarityKey}.png`);
-      if (fs.existsSync(framePath)) {
-        const frameImage = await loadImage(framePath);
-        ctx.drawImage(frameImage, 0, 0, W, H);
-      } else {
-        console.warn(`Frame not found for rarity: ${rarityKey}`);
-      }
+      await drawFrameFlush(ctx, framePath, W, H); // ← flush to edges
     }
 
     const finalBuffer = canvas.toBuffer('image/png');
@@ -218,18 +234,26 @@ async function generateImageFromPrompt(prompt, fileName, opts = {}) {
   }
 }
 
+// ====================== TEXT: RARITY-SCALED CHEST DESCRIPTION (≤60 words) ======================
 async function generateChestDescription(rarity) {
-  const prompt = `Write a fantasy-style loot chest description for a ${rarity.toLowerCase()} rarity chest. Do not describe specific items. Make it vivid and atmospheric. Keep under 80 words.`;
+  const tone = getRarityDescriptor(rarity);
+  const prompt = `
+Write a single-paragraph fantasy chest description for a ${rarity} chest.
+Constraints:
+- 45–60 words (concise but vivid)
+- No item spoilers
+- Use language intensity that matches rarity: ${tone}
+Return ONLY the description text.`;
   const response = await openai.chat.completions.create({
     model: 'gpt-4o',
     messages: [{ role: 'user', content: prompt }],
-    max_tokens: 150,
+    max_tokens: 160,
     temperature: 0.8
   });
   return response.choices[0].message.content.trim();
 }
 
-// ---- DROP CHEST ----
+// ====================== DROP CHEST ======================
 async function dropChest(guildId, manual = false) {
   try {
     const rarity = rollRarity();
@@ -237,13 +261,7 @@ async function dropChest(guildId, manual = false) {
     const desc = await generateChestDescription(rarity);
     const id = Date.now().toString();
 
-    const chestPrompt = [
-      `A fantasy treasure chest of ${rarity} rarity,`,
-      `cinematic lighting, ornate metal bands, mossy stones, enchanted atmosphere.`,
-      `High-fantasy illustration, single chest centered, square composition.`,
-      `Do NOT include any words, labels, UI, logos, or watermarks.`
-    ].join(' ');
-
+    const chestPrompt = buildChestImagePrompt(rarity);
     // Chest image: NO frame
     const imagePath = await generateImageFromPrompt(
       chestPrompt,
@@ -251,14 +269,13 @@ async function dropChest(guildId, manual = false) {
       { rarity, includeFrame: false }
     );
 
-    // define chest before any usage
     const chest = {
       id,
       rarity,
       score,
       desc,
       imagePath,
-      claimedBy: null,        // later becomes array after items generated
+      claimedBy: null,
       items: [],
       guildId,
       timestamp: Date.now(),
@@ -282,11 +299,12 @@ async function dropChest(guildId, manual = false) {
     const image = new AttachmentBuilder(imagePath);
     await channel.send({
       content:
-        `🎁 **A loot chest drops!**\n` +
-        `**ID:** \`${id}\`\n` +
-        `**Rarity:** ${rarity} *(Score: ${score})*\n` +
-        `**Description:** ${desc}\n\n` +
-        `Use \`!open ${id}\` to open it (costs 1 key).`,
+`🎁 **A loot chest drops!**
+**ID:** \`${id}\`
+**Rarity:** ${rarity} *(Score: ${score})*
+**Description:** ${desc}
+
+Use \`!open ${id}\` to open it (costs 1 key).`,
       files: [image]
     });
     console.log(`📤 Chest ${id} sent successfully.`);
@@ -556,13 +574,11 @@ Description: ...`
       counts[item.rarity] = (counts[item.rarity] || 0) + 1;
     }
 
-    // Award points and clear inventory
     points[userId] = (points[userId] || 0) + totalPoints;
     const totalItems = userInv.length;
     inventories[userId] = [];
     saveAll();
 
-    // Multi-line breakdown, most-scrapped first
     const lines = Object.entries(counts)
       .sort((a, b) => b[1] - a[1])
       .map(([rarity, qty]) => `${getColor(rarity)} ${rarity} - ${qty}`)
