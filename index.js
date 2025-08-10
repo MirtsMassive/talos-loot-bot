@@ -100,101 +100,64 @@ function getColor(rarity) {
   return rarityColors[rarity] || '⬜';
 }
 
-const sharp = require('sharp'); // (not currently used, but kept)
-
 // ====================== RARITY STYLING HELPERS ======================
-function getRarityVisualStyle(rarity) {
+function getRarityChestStyle(rarity) {
   switch (rarity.toLowerCase()) {
     case 'common':    return "sturdy wooden chest, iron bands, modest fantasy design, soft torchlight";
     case 'uncommon':  return "oak chest with faint runes, gentle magical glow, tasteful ornamentation";
-    case 'rare':      return "ornate chest, luminous runes, polished gold trim, rich leather & metalwork";
+    case 'rare':      return "ornate chest, luminous runes, polished gold trim, rich leather and metalwork";
     case 'epic':      return "majestic chest with swirling magical aura, gemstone inlays, intricate filigree, dramatic lighting";
     case 'legendary': return "magnificent chest radiating ancient power, rare jewels, halo of light from within, master craftsmanship";
     case 'mythic':    return "otherworldly chest humming with primal magic, celestial inlays, wisps of arcane energy, unreal detail";
-    case 'artifact':  return "mythic divine chest forged by gods, wreathed in cosmic light and living magic, awe-inspiring craftsmanship";
+    case 'artifact':  return "divine chest forged by gods, wreathed in cosmic light and living magic, awe-inspiring craftsmanship";
     default:          return "fantasy treasure chest";
   }
 }
 
-function getRarityDescriptor(rarity) {
+// Item style must NEVER describe a chest/container.
+function getRarityItemStyle(rarity) {
   switch (rarity.toLowerCase()) {
-    case 'common':    return "simple, sturdy, practical";
-    case 'uncommon':  return "engraved with faint runes and modest detailing";
-    case 'rare':      return "ornate, etched with glowing sigils, masterfully crafted";
-    case 'epic':      return "grand, humming with enchantment, filigreed and resplendent";
-    case 'legendary': return "magnificent, ancient power coiled within, jeweled and radiant";
-    case 'mythic':    return "otherworldly, alive with primal magic, steeped in lore";
-    case 'artifact':  return "divine, god-forged, surrounded by cosmic light and living spellwork";
-    default:          return "sturdy and dependable";
+    case 'common':    return "simple enchanted trinket, subtle glow, humble materials";
+    case 'uncommon':  return "refined mystical charm, etched motifs, faint aura";
+    case 'rare':      return "ornate relic, glowing runes, polished metals and crystal accents";
+    case 'epic':      return "grand arcane artifact, gemstones, radiant aura, intricate filigree";
+    case 'legendary': return "mythic relic radiating ancient power, masterwork detail, haloed light";
+    case 'mythic':    return "otherworldly artifact woven with primal magic, celestial gleam, exquisite craftsmanship";
+    case 'artifact':  return "god-forged relic of unimaginable power, cosmic radiance, sacred artistry";
+    default:          return "fantasy magical item";
   }
-}
-
-// ====================== FRAME: CROP TRANSPARENT PADDING ======================
-async function drawFrameFlush(ctx, framePath, W, H) {
-  if (!fs.existsSync(framePath)) {
-    console.warn(`❗ Frame not found: ${framePath}`);
-    return;
-  }
-  const frameImg = await loadImage(framePath);
-
-  // draw to temp to read alpha
-  const t = createCanvas(frameImg.width, frameImg.height);
-  const tctx = t.getContext('2d');
-  tctx.drawImage(frameImg, 0, 0);
-  const img = tctx.getImageData(0, 0, frameImg.width, frameImg.height);
-
-  let minX = img.width, minY = img.height, maxX = -1, maxY = -1;
-  for (let y = 0; y < img.height; y++) {
-    for (let x = 0; x < img.width; x++) {
-      const a = img.data[(y * img.width + x) * 4 + 3];
-      if (a > 0) {
-        if (x < minX) minX = x;
-        if (y < minY) minY = y;
-        if (x > maxX) maxX = x;
-        if (y > maxY) maxY = y;
-      }
-    }
-  }
-
-  if (maxX < 0 || maxY < 0) {
-    console.warn(`❗ Frame has no visible pixels: ${framePath}`);
-    return;
-  }
-
-  const srcW = maxX - minX + 1;
-  const srcH = maxY - minY + 1;
-  ctx.drawImage(frameImg, minX, minY, srcW, srcH, 0, 0, W, H);
 }
 
 // ====================== IMAGE PROMPT BUILDERS ======================
 function buildFantasyItemImagePrompt(name, shortDesc, rarity) {
   const cleanName = (name || '').replace(/[\"<>]/g, '');
   const cleanDesc = (shortDesc || '').replace(/[\"<>]/g, '');
-  const rarityStyle = getRarityVisualStyle(rarity);
+  const rarityStyle = getRarityItemStyle(rarity);
 
   return [
-    `High-fantasy game item icon, ${rarity.toLowerCase()} rarity: "${cleanName}". ${cleanDesc}.`,
-    `Style: ${rarityStyle}, hand-painted illustration, single centered subject on neutral dark backdrop,`,
+    `High-fantasy game item icon — ${rarity.toLowerCase()} rarity: "${cleanName}". ${cleanDesc}.`,
+    `Style: ${rarityStyle}, hand-painted illustration, single centered subject on a neutral gradient backdrop,`,
     `subtle volumetric light, intricate magical detail.`,
-    `ABSOLUTE RULES: no words, no letters, no labels, no UI, no watermark, no logos,`,
-    `no product photography, no modern objects, no people, no hands. Square composition.`
+    `ABSOLUTE RULES: focus on the item only; no extra objects.`,
+    `Do NOT depict any chest, box, crate, packaging, container, table, or scene.`,
+    `No people, no hands, no characters.`,
+    `No words, letters, labels, UI, logos, watermarks, text.`,
+    `No modern or sci-fi objects. Square composition.`
   ].join(' ');
 }
 
 function buildChestImagePrompt(rarity) {
-  const style = getRarityVisualStyle(rarity);
+  const style = getRarityChestStyle(rarity);
   return [
     `${style}. Single chest centered. Cinematic lighting.`,
     `Ultra high detail, mystical fantasy illustration.`,
-    `ABSOLUTE RULES: no words, no letters, no labels, no UI, no watermark, no logos.`,
+    `ABSOLUTE RULES: no words, letters, labels, UI, logos, watermarks.`,
     `Square composition.`
   ].join(' ');
 }
 
-// ====================== IMAGE GENERATION (FRAMES ONLY FOR ITEMS) ======================
-async function generateImageFromPrompt(prompt, fileName, opts = {}) {
-  const { rarity = 'Common', includeFrame = false } = opts;
-
+// ====================== IMAGE GENERATION ======================
+async function generateImageFromPrompt(prompt, fileName) {
   try {
     const image = await openai.images.generate({
       model: 'dall-e-3',
@@ -216,12 +179,6 @@ async function generateImageFromPrompt(prompt, fileName, opts = {}) {
 
     ctx.drawImage(baseImage, 0, 0, W, H);
 
-    if (includeFrame) {
-      const rarityKey = String(rarity || 'Common').toLowerCase();
-      const framePath = path.join('frames', `frame_${rarityKey}.png`);
-      await drawFrameFlush(ctx, framePath, W, H); // ← flush to edges
-    }
-
     const finalBuffer = canvas.toBuffer('image/png');
     const finalPath = path.join(TEMP_DIR, fileName);
     fs.writeFileSync(finalPath, finalBuffer);
@@ -236,13 +193,23 @@ async function generateImageFromPrompt(prompt, fileName, opts = {}) {
 
 // ====================== TEXT: RARITY-SCALED CHEST DESCRIPTION (≤60 words) ======================
 async function generateChestDescription(rarity) {
-  const tone = getRarityDescriptor(rarity);
+  const toneByRarity = {
+    common:    "simple, sturdy, practical",
+    uncommon:  "engraved with faint runes and modest detailing",
+    rare:      "ornate, etched with glowing sigils, masterfully crafted",
+    epic:      "grand, humming with enchantment, filigreed and resplendent",
+    legendary: "magnificent, ancient power coiled within, jeweled and radiant",
+    mythic:    "otherworldly, alive with primal magic, steeped in lore",
+    artifact:  "divine, god-forged, surrounded by cosmic light and living spellwork"
+  };
+  const tone = toneByRarity[rarity.toLowerCase()] || "fantastical";
+
   const prompt = `
 Write a single-paragraph fantasy chest description for a ${rarity} chest.
 Constraints:
 - 45–60 words (concise but vivid)
 - No item spoilers
-- Use language intensity that matches rarity: ${tone}
+- Language intensity should match this guidance: ${tone}
 Return ONLY the description text.`;
   const response = await openai.chat.completions.create({
     model: 'gpt-4o',
@@ -262,11 +229,9 @@ async function dropChest(guildId, manual = false) {
     const id = Date.now().toString();
 
     const chestPrompt = buildChestImagePrompt(rarity);
-    // Chest image: NO frame
     const imagePath = await generateImageFromPrompt(
       chestPrompt,
-      `${id}_chest.png`,
-      { rarity, includeFrame: false }
+      `${id}_chest.png`
     );
 
     const chest = {
@@ -430,11 +395,10 @@ Description: ...`
         const shortDesc = (description || '').split(': ')[1] || 'Ancient relic infused with quiet power.';
         const imagePrompt = buildFantasyItemImagePrompt(name, shortDesc, rarity);
 
-        // Item images: WITH frame
+        // Item images: NO frames (per request)
         const imagePath = await generateImageFromPrompt(
           imagePrompt,
-          `${chest.id}_item${idx + 1}.png`,
-          { rarity, includeFrame: true }
+          `${chest.id}_item${idx + 1}.png`
         );
 
         return {
